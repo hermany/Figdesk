@@ -3,14 +3,15 @@
 Reads assets/app-icon/figcraft-small.svg (the owner's drawing, MIT OR Apache-2.0), writes
 assets/app-icon/figcraft.svg and figcraft-small.svg. Needs rsvg-convert and sips (macOS).
 Then run `cargo xtask icon` (needs resvg) or figdesk/icon/render.sh to render PNG/ICO."""
-import math, os, struct, subprocess, sys, tempfile
+import math, os, random, struct, subprocess, sys, tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SRC = os.path.join(ROOT, "assets/app-icon/figcraft-small.svg")
 SRC_BACKUP = os.path.join(ROOT, "figdesk/icon/chameleon-source.svg")
 N = 34                      # dots per side
 S = 4                       # samples per cell side
-BG = "#1e1e1e"
+BG = "#ffffff"
+rng = random.Random(7)      # fixed seed: the scatter is random-looking but the icon is reproducible
 PALETTE = ["#f24e1e", "#ff7262", "#a259ff", "#1abcfe", "#0acf83"]  # red, orange, purple, blue, green
 
 if not os.path.exists(SRC_BACKUP):               # keep the original drawing so the script can re-run
@@ -51,9 +52,11 @@ for gy in range(N):
         cov = fig / (S * S)
         if cov < 0.2: continue
         light = (fig - ink) / (S * S)            # paper area -> big dots, engraved lines -> small
-        r = cell * (0.20 + 0.32 * light * cov)
-        cx, cy = (gx + .5) * cell, (gy + .5) * cell
-        dots.append((cx, cy, r, colour((gx + gy) / (2 * (N - 1)))))
+        r = cell * (0.20 + 0.32 * light * cov) * rng.uniform(0.45, 1.6)   # varied sizes
+        cx = (gx + .5 + rng.uniform(-0.32, 0.32)) * cell                    # scattered off the grid
+        cy = (gy + .5 + rng.uniform(-0.32, 0.32)) * cell
+        u = (gx + gy) / (2 * (N - 1)) + rng.uniform(-0.08, 0.08)
+        dots.append((cx, cy, r, colour(u)))
 
 def svg():
     out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><clipPath id="t"><rect width="512" height="512" rx="112"/></clipPath></defs>'
