@@ -101,7 +101,8 @@ impl App {
                 Some(p) => Ok(p),
                 None => self.start_control(fig),
             };
-            let started = port.and_then(|p| self.agent.send(&request.prompt, fig.ui.chat.session.as_deref(), p, request.model));
+            let started =
+                port.and_then(|p| self.agent.send(request.provider, &request.prompt, fig.ui.chat.session_for(request.provider), p, request.model));
             if let Err(e) = started {
                 fig.ui.chat.finish(Some(&e));
             }
@@ -111,7 +112,7 @@ impl App {
         }
         for event in self.agent.drain() {
             match event {
-                Event::Session(id) => fig.ui.chat.session = Some(id),
+                Event::Session(id) => fig.ui.chat.set_session(id),
                 Event::Text(text) => fig.ui.chat.append_assistant(&text),
                 Event::Tool(name) => fig.ui.chat.add_tool(&name),
                 Event::Done(error) => fig.ui.chat.finish(error.as_deref()),

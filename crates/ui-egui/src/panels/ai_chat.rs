@@ -4,11 +4,12 @@
 //! takes the prompt from [`ChatState::request`] and writes the agent's output back through
 //! [`ChatState::append_assistant`], [`ChatState::add_tool`] and [`ChatState::finish`].
 
-use egui::{Align2, CornerRadius, Key, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, CornerRadius, Key, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
 
 use crate::FigApp;
 use crate::ai::{text_button, wrapped};
 use crate::i18n::{tr, tr_noop};
+use crate::icons::{self, Icon};
 use crate::theme::{Tokens, regular, semibold};
 
 /// Most messages kept: the oldest are dropped, so a long session stays bounded.
@@ -63,19 +64,28 @@ pub struct Message {
     pub text: String,
 }
 
-/// The model the agent runs, by the names its command line takes.
+/// The AI command line the app runs for the chat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Provider {
+    Claude,
+    Codex,
+}
+
+/// What the agent runs on, as the model list shows it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Model {
-    /// The one the user's own setup picks.
+    /// Claude, with the model the user's own setup picks.
     #[default]
     Default,
     Opus,
     Sonnet,
     Haiku,
+    /// Codex, with the model the user's own setup picks.
+    Codex,
 }
 
 impl Model {
-    pub const ALL: [Model; 4] = [Model::Default, Model::Opus, Model::Sonnet, Model::Haiku];
+    pub const ALL: [Model; 5] = [Model::Default, Model::Opus, Model::Sonnet, Model::Haiku, Model::Codex];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -83,13 +93,18 @@ impl Model {
             Model::Opus => "Claude Opus",
             Model::Sonnet => "Claude Sonnet",
             Model::Haiku => "Claude Haiku",
+            Model::Codex => "Codex",
         }
     }
 
-    /// The `--model` value, or none to leave the choice to the user's setup.
+    pub fn provider(self) -> Provider {
+        if self == Model::Codex { Provider::Codex } else { Provider::Claude }
+    }
+
+    /// Claude's `--model` value, or none to leave the choice to the user's setup (Codex reads its own).
     pub fn flag(self) -> Option<&'static str> {
         match self {
-            Model::Default => None,
+            Model::Default | Model::Codex => None,
             Model::Opus => Some("opus"),
             Model::Sonnet => Some("sonnet"),
             Model::Haiku => Some("haiku"),
@@ -102,6 +117,7 @@ impl Model {
 pub struct Request {
     /// What the agent is told: the selection as context, then what the user wrote.
     pub prompt: String,
+    pub provider: Provider,
     pub model: Option<&'static str>,
 }
 
@@ -112,8 +128,10 @@ pub struct ChatState {
     pub input: String,
     /// The agent is answering.
     pub running: bool,
-    /// The agent's conversation id, so the next prompt continues it.
-    pub session: Option<String>,
+    /// The agent's conversation id and whose it is, so the next prompt to the same agent continues it.
+    pub session: Option<(Provider, String)>,
+    /// Who the last prompt went to.
+    pub last_provider: Option<Provider>,
     /// Show the connection instructions instead of the chat.
     pub setup: bool,
     /// A prompt for the app to send to the agent.
@@ -156,9 +174,22 @@ impl ChatState {
         self.push(Role::User, shown.clone());
         let mut prompt = format!("{context}{shown}");
         cut(&mut prompt, MAX_PROMPT_BYTES + MAX_CONTEXT_BYTES);
-        self.request = Some(Request { prompt, model: self.model.flag() });
+        self.last_provider = Some(self.model.provider());
+        self.request = Some(Request { prompt, provider: self.model.provider(), model: self.model.flag() });
         self.running = true;
         self.input.clear();
+    }
+
+    /// The conversation id the agent reported for its last prompt's provider.
+    pub fn set_session(&mut self, id: String) {
+        if let Some(provider) = self.last_provider {
+            self.session = Some((provider, id));
+        }
+    }
+
+    /// The id to continue with when the prompt goes to `provider`: a conversation is the agent's own.
+    pub fn session_for(&self, provider: Provider) -> Option<&str> {
+        self.session.as_ref().filter(|(p, _)| *p == provider).map(|(_, id)| id.as_str())
     }
 
     /// Text the agent is writing: it continues its last message, or starts a new one after a tool.
@@ -201,7 +232,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let pad = 14.0;
     let w = (ui.available_width() - 2.0 * pad).max(0.0);
-    let input_h = 96.0 + if selected(app).is_empty() { 0.0 } else { 30.0 };
+    let input_h = 104.0 + if selected(app).is_empty() { 0.0 } else { 32.0 };
     ui.add_space(8.0);
     header(app, ui, w, pad);
     let list_h = (ui.available_height() - input_h - 20.0).max(60.0);
@@ -291,20 +322,20 @@ fn message(ui: &mut Ui, m: &Message, w: f32) {
     ui.add_space(8.0);
 }
 
-/// The box the user writes in: the selected layers as chips, the text, the model and Send (or Stop
-/// while the agent works). Enter sends; Shift+Enter starts a new line.
+/// The box the user writes in: the selected layers as chips, the text, and below it the model
+/// (a list) and the round Send button, which becomes Stop while the agent works. Enter sends;
+/// Shift+Enter starts a new line.
 fn composer(app: &mut FigApp, ui: &mut Ui, w: f32, pad: f32) {
     let t = Tokens::get(ui.ctx());
     let sel = selected(app);
-    let chips_h = if sel.is_empty() { 0.0 } else { 30.0 };
-    let h = 96.0 + chips_h;
+    let chips_h = if sel.is_empty() { 0.0 } else { 32.0 };
+    let h = 104.0 + chips_h;
     ui.horizontal(|ui| {
         ui.add_space(pad);
         let (r, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
-        ui.painter().rect(r, CornerRadius::same(10), t.field, Stroke::new(1.0, t.border), StrokeKind::Inside);
-        chips(ui, &sel, egui::Rect::from_min_size(pos2(r.min.x + 8.0, r.min.y + 6.0), vec2(r.width() - 16.0, 22.0)));
-        let top = r.min.y + 6.0 + chips_h;
-        let edit_rect = egui::Rect::from_min_max(pos2(r.min.x + 8.0, top), pos2(r.max.x - 8.0, r.max.y - 34.0));
+        ui.painter().rect(r, CornerRadius::same(14), t.field, Stroke::new(1.0, t.border), StrokeKind::Inside);
+        chips(ui, &sel, egui::Rect::from_min_size(pos2(r.min.x + 10.0, r.min.y + 10.0), vec2(r.width() - 20.0, 24.0)));
+        let edit_rect = egui::Rect::from_min_max(pos2(r.min.x + 14.0, r.min.y + 10.0 + chips_h), pos2(r.max.x - 14.0, r.max.y - 48.0));
         let id = ui.scope_id().with("ai_chat_input");
         let mut edit_ui = ui.new_child(egui::UiBuilder::new().max_rect(edit_rect));
         let edit = egui::TextEdit::multiline(&mut app.ui.chat.input)
@@ -316,10 +347,57 @@ fn composer(app: &mut FigApp, ui: &mut Ui, w: f32, pad: f32) {
             .lock_focus(true);
         let response = edit_ui.add(edit);
         let enter = response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
-        // The model, at the left of the bottom row.
-        let model_rect = egui::Rect::from_min_size(pos2(r.min.x + 8.0, r.max.y - 32.0), vec2((r.width() - 100.0).clamp(60.0, 150.0), 26.0));
-        let mut model_ui = ui.new_child(egui::UiBuilder::new().max_rect(model_rect));
-        let drop = crate::widgets::dropdown(&mut model_ui, tr(app.ui.chat.model.label()), model_rect.width(), None);
+        let running = app.ui.chat.running;
+        let has_text = !app.ui.chat.input.trim().is_empty();
+        // The round button at the bottom right.
+        let center = pos2(r.max.x - 26.0, r.max.y - 26.0);
+        let round = egui::Rect::from_center_size(center, Vec2::splat(30.0));
+        let send = ui.interact(round, ui.scope_id().with("ai_send"), Sense::click());
+        crate::a11y::button(&send, if running { tr("Stop") } else { tr("Send") });
+        let live = running || has_text;
+        let fill = if !live {
+            t.text_tertiary
+        } else if send.hovered() {
+            t.text_secondary
+        } else {
+            t.text
+        };
+        ui.painter().circle_filled(center, 15.0, fill);
+        if running {
+            ui.painter().rect_filled(egui::Rect::from_center_size(center, Vec2::splat(10.0)), CornerRadius::same(2), t.panel);
+        } else {
+            let ink = Stroke::new(2.0, t.panel);
+            ui.painter().line_segment([pos2(center.x, center.y + 6.0), pos2(center.x, center.y - 6.0)], ink);
+            ui.painter().line_segment([pos2(center.x - 5.0, center.y - 1.0), pos2(center.x, center.y - 6.0)], ink);
+            ui.painter().line_segment([pos2(center.x + 5.0, center.y - 1.0), pos2(center.x, center.y - 6.0)], ink);
+        }
+        if running {
+            if send.clicked() {
+                app.ui.chat.cancel = true;
+            }
+        } else if (send.clicked() || enter) && has_text {
+            let text = app.ui.chat.input.trim_end_matches('\n').to_string();
+            app.ui.chat.send(&text, &context(&sel));
+            response.request_focus();
+        }
+        // The model, as text with a chevron, left of the round button.
+        let label = tr(app.ui.chat.model.label());
+        let galley = ui.painter().layout_no_wrap(label.to_string(), regular(12.0), t.text_secondary);
+        let width = (galley.size().x + 24.0).min(round.min.x - r.min.x - 24.0).max(40.0);
+        let model_rect = egui::Rect::from_min_size(pos2(round.min.x - 10.0 - width, center.y - 13.0), vec2(width, 26.0));
+        let drop = ui.interact(model_rect, ui.scope_id().with("ai_model"), Sense::click());
+        crate::a11y::combo(&drop, tr("Model"), label, crate::a11y::menu_open(&drop));
+        if drop.hovered() {
+            ui.painter().rect_filled(model_rect, CornerRadius::same(6), t.hover);
+        }
+        let shown = crate::widgets::elide_font(ui, label, width - 24.0, regular(12.0));
+        ui.painter().text(pos2(model_rect.min.x + 6.0, model_rect.center().y), Align2::LEFT_CENTER, shown, regular(12.0), t.text_secondary);
+        icons::paint(
+            ui.painter(),
+            egui::Rect::from_center_size(pos2(model_rect.max.x - 9.0, model_rect.center().y), vec2(10.0, 10.0)),
+            Icon::Chevron,
+            t.icon_secondary,
+        );
         crate::right::menu_popup(&drop).show(|ui| {
             for m in Model::ALL {
                 if crate::right::menu_item(ui, tr(m.label()), "") {
@@ -328,37 +406,33 @@ fn composer(app: &mut FigApp, ui: &mut Ui, w: f32, pad: f32) {
                 }
             }
         });
-        let button = egui::Rect::from_min_size(pos2(r.max.x - 78.0, r.max.y - 32.0), vec2(70.0, 26.0));
-        let mut button_ui = ui.new_child(egui::UiBuilder::new().max_rect(button));
-        if app.ui.chat.running {
-            if text_button(&mut button_ui, tr("Stop"), 70.0) {
-                app.ui.chat.cancel = true;
-            }
-        } else if text_button(&mut button_ui, tr("Send"), 70.0) || enter {
-            let text = app.ui.chat.input.trim_end_matches('\n').to_string();
-            app.ui.chat.send(&text, &context(&sel));
-            response.request_focus();
-        }
     });
 }
 
-/// The selected layers as chips along `row`; the ones that don't fit are counted.
+/// The selected layers as chips along `row`, each with a layer icon and a `#` before its name; the
+/// ones that don't fit are counted.
 fn chips(ui: &mut Ui, sel: &[(u64, String)], row: egui::Rect) {
     let t = Tokens::get(ui.ctx());
     let mut x = row.min.x;
     for (i, (_, name)) in sel.iter().take(MAX_SELECTED).enumerate() {
         let room = row.max.x - x;
         let left = sel.len() - i;
-        if room < 60.0 {
+        if room < 70.0 {
             let more = format!("+{left}");
             ui.painter().text(pos2(x, row.center().y), Align2::LEFT_CENTER, more, regular(11.0), t.text_secondary);
             return;
         }
-        let shown = crate::widgets::elide_font(ui, name, (room - 16.0).min(130.0), regular(11.0));
-        let galley = ui.painter().layout_no_wrap(shown, regular(11.0), t.text_secondary);
-        let chip = egui::Rect::from_min_size(pos2(x, row.min.y), vec2(galley.size().x + 16.0, row.height()));
-        ui.painter().rect(chip, CornerRadius::same(6), t.panel, Stroke::new(1.0, t.border), StrokeKind::Inside);
-        ui.painter().galley(pos2(chip.min.x + 8.0, chip.center().y - galley.size().y / 2.0), galley, t.text_secondary);
+        let shown = crate::widgets::elide_font(ui, &format!("#{name}"), (room - 34.0).min(130.0), regular(12.0));
+        let galley = ui.painter().layout_no_wrap(shown, regular(12.0), t.text_secondary);
+        let chip = egui::Rect::from_min_size(pos2(x, row.min.y), vec2(galley.size().x + 34.0, row.height()));
+        ui.painter().rect(chip, CornerRadius::same(7), t.panel, Stroke::new(1.0, t.border), StrokeKind::Inside);
+        icons::paint(
+            ui.painter(),
+            egui::Rect::from_center_size(pos2(chip.min.x + 13.0, chip.center().y), Vec2::splat(14.0)),
+            Icon::Frame,
+            t.icon_secondary,
+        );
+        ui.painter().galley(pos2(chip.min.x + 25.0, chip.center().y - galley.size().y / 2.0), galley, t.text_secondary);
         x = chip.max.x + 6.0;
     }
 }
