@@ -7,13 +7,13 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>FigCraft</string>
+  <string>Figdesk</string>
   <key>CFBundleName</key>
-  <string>FigCraft</string>
+  <string>Figdesk</string>
   <key>CFBundleExecutable</key>
-  <string>FigCraft</string>
+  <string>Figdesk</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.storyteller.figcraft</string>
+  <string>io.github.hermany.figdesk</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>
@@ -29,7 +29,7 @@
   <key>FigCraftBuildCommit</key>
   <string>@BUILD_SHA@</string>
   <key>CFBundleIconFile</key>
-  <string>FigCraft</string>
+  <string>Figdesk</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.graphics-design</string>
   <!-- Must match MACOSX_DEPLOYMENT_TARGET in package.sh. Big Sur is the first release on
