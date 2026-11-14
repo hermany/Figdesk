@@ -1,4 +1,5 @@
 ---
+version: 3
 status: default
 ---
 # Base prompt

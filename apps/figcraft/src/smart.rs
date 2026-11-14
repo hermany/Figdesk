@@ -79,23 +79,28 @@ pub fn ensure_prompts(work_dir: &Path) -> std::io::Result<()> {
     let base = work_dir.join(AGENT_FOLDER);
     std::fs::create_dir_all(&base)?;
     for (file, doc) in AGENT_DOCS {
-        let path = base.join(file);
-        if !path.exists() {
-            std::fs::write(path, doc)?;
-        }
+        place(&base.join(file), doc)?;
     }
     let dir = prompts_dir(work_dir);
     std::fs::create_dir_all(&dir)?;
     for (id, doc) in DEFAULTS {
-        let path = dir.join(format!("{id}.md"));
-        if !path.exists() {
+        place(&dir.join(format!("{id}.md")), doc)?;
+    }
+    Ok(())
+}
+
+/// Put the shipped `doc` at `path`: a missing file is written; one from an older app (a lower `version`,
+/// 1 when it has none) is kept as `<file>.v<N>.bak` and replaced; a current one is never touched.
+fn place(path: &Path, doc: &str) -> std::io::Result<()> {
+    if !path.exists() {
+        return std::fs::write(path, doc);
+    }
+    let old = version_of(&read_doc(path).unwrap_or_default());
+    if old < version_of(doc) {
+        let bak = path.with_extension(format!("md.v{old}.bak"));
+        if !bak.exists() {
+            std::fs::rename(path, &bak)?;
             std::fs::write(path, doc)?;
-        } else if version_of(&read_doc(&path).unwrap_or_default()) < version_of(doc) {
-            // A document from an older app: keep it as `<mode>.md.v<N>.bak` and put the current one.
-            let bak = dir.join(format!("{id}.md.v{}.bak", version_of(&read_doc(&path).unwrap_or_default())));
-            if !bak.exists() && std::fs::rename(&path, &bak).is_ok() {
-                std::fs::write(&path, doc)?;
-            }
         }
     }
     Ok(())
@@ -228,15 +233,15 @@ mod tests {
         ensure_prompts(&dir).expect("copied");
         for file in ["prompt.md", "design.md", "agent.md"] {
             let text = std::fs::read_to_string(dir.join(".agent").join(file)).expect(file);
-            assert!(text.starts_with("---\nstatus: default\n---"), "{file} starts unconfirmed");
+            assert!(text.starts_with("---\nversion: 3\nstatus: default\n---"), "{file} starts unconfirmed");
         }
         let design = std::fs::read_to_string(dir.join(".agent/design.md")).expect("design");
         assert!(design.contains("Tailwind CSS") && design.contains("plain React"));
         let agent = std::fs::read_to_string(dir.join(".agent/agent.md")).expect("agent");
         assert!(agent.contains("status: confirmed") && agent.contains("ONE screen"));
-        std::fs::write(dir.join(".agent/design.md"), "mine").expect("edit");
+        std::fs::write(dir.join(".agent/design.md"), "---\nversion: 3\n---\nmine").expect("edit");
         ensure_prompts(&dir).expect("again");
-        assert_eq!(std::fs::read_to_string(dir.join(".agent/design.md")).expect("read"), "mine", "never overwritten");
+        assert_eq!(std::fs::read_to_string(dir.join(".agent/design.md")).expect("read"), "---\nversion: 3\n---\nmine", "never overwritten");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -306,15 +311,18 @@ mod tests {
         ensure_prompts(&dir).expect("copied");
         assert!(!confirmed(&dir));
         for f in ["prompt.md", "design.md", "agent.md"] {
-            std::fs::write(dir.join(".agent").join(f), "---\nstatus: confirmed\n---\nx").expect("write");
+            std::fs::write(dir.join(".agent").join(f), "---\nversion: 3\nstatus: confirmed\n---\nx").expect("write");
         }
         assert!(confirmed(&dir));
-        std::fs::write(dir.join(".agent/agent.md"), "---\nstatus: default\n---\nx").expect("write");
+        std::fs::write(dir.join(".agent/agent.md"), "---\nversion: 3\nstatus: default\n---\nx").expect("write");
         assert!(!confirmed(&dir));
+        std::fs::write(dir.join(".agent/design.md"), "---\nstatus: confirmed\n---\nExpo").expect("old design");
         std::fs::write(dir.join("prompts/web.md"), "---\ntitle: Web\nstack: HTML5\n---\nold").expect("old");
         ensure_prompts(&dir).expect("upgraded");
         assert_eq!(std::fs::read_to_string(dir.join("prompts/web.md.v1.bak")).expect("bak"), "---\ntitle: Web\nstack: HTML5\n---\nold");
         assert!(std::fs::read_to_string(dir.join("prompts/web.md")).expect("new").contains("version: 3"));
+        assert!(std::fs::read_to_string(dir.join(".agent/design.md.v1.bak")).expect("bak").contains("Expo"));
+        assert!(std::fs::read_to_string(dir.join(".agent/design.md")).expect("new").contains("status: default"), "asks again");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
