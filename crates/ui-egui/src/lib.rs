@@ -341,6 +341,7 @@ pub use dialogs::variables_panel;
 pub use home::home_recents;
 pub use home::online;
 pub use panels::ai;
+pub use panels::ai_chat;
 pub use panels::assets_panel;
 pub use panels::component_panel;
 pub use panels::dev_compare;
@@ -444,6 +445,8 @@ pub struct UiState {
     /// The port the control channel listens on (`--control`), if it does: the AI tab says so.
     pub control_port: Option<u16>,
     pub ai: ai::AiState,
+    /// The conversation with the AI agent, in the AI tab.
+    pub chat: ai_chat::ChatState,
     /// A start or stop of the control channel asked for by the AI tab, for the app to carry out.
     pub control_action: Option<ai::Action>,
     /// Why the last start failed, for the AI tab.
@@ -675,6 +678,7 @@ impl Default for UiState {
             left_tab: LeftTab::File,
             control_port: None,
             ai: ai::AiState::default(),
+            chat: ai_chat::ChatState::default(),
             control_action: None,
             control_error: None,
             pages_open: true,

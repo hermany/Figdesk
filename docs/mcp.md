@@ -2269,3 +2269,15 @@ flag needed) and shows what to paste into Claude Code, Codex or any other MCP cl
 taken; the tab shows the port in use. Turning it off closes every open connection and frees the port.
 The `--automation-*` roots don't apply to an attached server (the app confines it), so the tab
 doesn't offer them.
+
+#### The chat
+
+With the channel on, the AI tab is a chat. Each prompt runs the user's own `claude -p` command line
+(found on `PATH` or in the usual install folders; it uses the user's Claude login and the app stores no
+key) with this app's MCP server attached, so the agent designs in the open document. The conversation
+continues across prompts (`--resume`). The layers selected on the page show as chips in the box and are
+sent with the prompt (ids and quoted names, marked as data), and the model is picked from a list (the
+default is the one the user's own setup uses). The agent gets only the MCP design tools: its own file,
+shell and web tools are off, and `open_file`, `save_file` and `export` are refused. `run_command` can
+still reach file commands, because an attached app does not confine them. Codex is not wired into the
+chat yet: connect it from the Setup view as before.

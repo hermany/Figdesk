@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_chat;
 pub mod assets_panel;
 pub mod component_panel;
 pub mod dev_compare;

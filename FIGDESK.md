@@ -71,3 +71,4 @@ When you add one of these, add its row here in the same commit; when you remove 
 | AI panel | `figdesk/ai-panel/` | Claude chat that edits the open document live |
 | Icon generator | `figdesk/icon/` | Dotted-chameleon app icon |
 | Upstream compare | `figdesk/scripts/upstream-compare.sh` | New upstream commits, changed areas, likely conflicts |
+| AI tab | `crates/ui-egui/src/panels/ai.rs`, `ai_chat.rs`, `apps/figcraft/src/agent.rs` | Connection setup and chat with a local `claude` agent over the app's MCP server |

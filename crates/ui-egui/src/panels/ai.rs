@@ -98,6 +98,10 @@ fn where_to(client: Client) -> &'static str {
 }
 
 pub fn show(app: &mut FigApp, ui: &mut Ui) {
+    if app.ui.control_port.is_some() && !app.ui.chat.setup {
+        crate::ai_chat::show(app, ui);
+        return;
+    }
     let pad = 16.0;
     let w = (ui.available_width() - 2.0 * pad).max(0.0);
     ui.add_space(12.0);
@@ -130,7 +134,11 @@ fn status(app: &mut FigApp, ui: &mut Ui, w: f32) {
     let label = if on { tr("Turn off") } else { tr("Turn on") };
     if text_button(ui, label, w.min(96.0)) {
         app.ui.control_action = Some(if on { Action::Stop } else { Action::Start });
+        app.ui.chat.setup = false;
         app.ui.control_error = None;
+    }
+    if on && text_button(ui, tr("Back to chat"), w.min(120.0)) {
+        app.ui.chat.setup = false;
     }
     if let Some(error) = app.ui.control_error.clone() {
         ui.add_space(6.0);
@@ -177,7 +185,7 @@ fn connect(app: &mut FigApp, ui: &mut Ui, w: f32) {
 }
 
 /// Text wrapped to `w`, as one block.
-fn wrapped(ui: &mut Ui, text: &str, w: f32, font: FontId, color: egui::Color32) {
+pub(crate) fn wrapped(ui: &mut Ui, text: &str, w: f32, font: FontId, color: egui::Color32) {
     let galley = ui.painter().layout(text.to_string(), font, color, w);
     let (r, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
     ui.painter().galley(r.min, galley, color);
@@ -194,7 +202,7 @@ fn code_box(ui: &mut Ui, text: &str, w: f32) {
 }
 
 /// A plain text button `w` wide; true when clicked.
-fn text_button(ui: &mut Ui, label: &str, w: f32) -> bool {
+pub(crate) fn text_button(ui: &mut Ui, label: &str, w: f32) -> bool {
     let t = Tokens::get(ui.ctx());
     let (r, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
     let resp = ui.interact(r, ui.scope_id().with(("ai_button", label)), Sense::click());

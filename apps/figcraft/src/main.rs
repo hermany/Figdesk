@@ -20,6 +20,7 @@
 #[cfg(all(target_os = "windows", target_env = "gnu", not(windows_slim_errors)))]
 compile_error!("Windows GNU builds must set windows_slim_errors to keep UI Automation responsive");
 
+mod agent;
 #[cfg(target_os = "macos")]
 mod apple_events;
 mod args;
@@ -60,6 +61,8 @@ struct App {
     queue: Arc<Mutex<Vec<ControlRequest>>>,
     /// The running control server, when there is one: started by `--control` or the AI tab's switch.
     control: Option<control_server::Handle>,
+    /// The AI agent the AI tab's chat talks to.
+    agent: agent::Agent,
     ctx_slot: Arc<Mutex<Option<egui::Context>>>,
     /// The window title last sent: a viewport command asks for another frame, so it's only sent
     /// when the title changes (sending it every frame kept an idle window redrawing).
@@ -74,11 +77,53 @@ struct App {
 }
 
 impl App {
+    /// Start the control server on the usual port, or any free one; the port is reported in `fig.ui`.
+    fn start_control(&mut self, fig: &mut FigApp) -> Result<u16, String> {
+        use figcraft_ui_egui::ai::DEFAULT_PORT;
+        let start = |port| {
+            control_server::start_handle(port, std::time::Duration::ZERO, self.queue.clone(), self.ctx_slot.clone(), fig.session.events.clone())
+        };
+        let server = start(DEFAULT_PORT).or_else(|_| start(0))?;
+        let port = server.port();
+        fig.ui.control_port = Some(port);
+        fig.ui.control_error = None;
+        self.control = Some(server);
+        Ok(port)
+    }
+
+    /// The chat's side of the AI tab: send a prompt to the agent (turning the control channel on when
+    /// it is off, as the agent reaches the design through it), stop a turn, and write what the agent
+    /// reports into the conversation.
+    fn drive_agent(&mut self, fig: &mut FigApp) {
+        use agent::Event;
+        if let Some(request) = fig.ui.chat.request.take() {
+            let port = match fig.ui.control_port {
+                Some(p) => Ok(p),
+                None => self.start_control(fig),
+            };
+            let started = port.and_then(|p| self.agent.send(&request.prompt, fig.ui.chat.session.as_deref(), p, request.model));
+            if let Err(e) = started {
+                fig.ui.chat.finish(Some(&e));
+            }
+        }
+        if std::mem::take(&mut fig.ui.chat.cancel) {
+            self.agent.cancel();
+        }
+        for event in self.agent.drain() {
+            match event {
+                Event::Session(id) => fig.ui.chat.session = Some(id),
+                Event::Text(text) => fig.ui.chat.append_assistant(&text),
+                Event::Tool(name) => fig.ui.chat.add_tool(&name),
+                Event::Done(error) => fig.ui.chat.finish(error.as_deref()),
+            }
+        }
+    }
+
     /// Carry out the AI tab's request to start or stop the control server. A start tries the usual
     /// port (what a saved client configuration names), then any free one; the tab reads the port or
     /// the failure from `fig.ui`.
     fn apply_control_action(&mut self, fig: &mut FigApp, ctx: &egui::Context) {
-        use figcraft_ui_egui::ai::{Action, DEFAULT_PORT};
+        use figcraft_ui_egui::ai::Action;
         match fig.ui.control_action.take() {
             Some(Action::Stop) => {
                 if let Some(server) = self.control.take() {
@@ -87,22 +132,8 @@ impl App {
                 fig.ui.control_port = None;
             }
             Some(Action::Start) if self.control.is_none() => {
-                let start = |port| {
-                    control_server::start_handle(
-                        port,
-                        std::time::Duration::ZERO,
-                        self.queue.clone(),
-                        self.ctx_slot.clone(),
-                        fig.session.events.clone(),
-                    )
-                };
-                match start(DEFAULT_PORT).or_else(|_| start(0)) {
-                    Ok(server) => {
-                        fig.ui.control_port = Some(server.port());
-                        fig.ui.control_error = None;
-                        self.control = Some(server);
-                    }
-                    Err(e) => fig.ui.control_error = Some(e),
+                if let Err(e) = self.start_control(fig) {
+                    fig.ui.control_error = Some(e);
                 }
             }
             Some(Action::Start) | None => {}
@@ -126,6 +157,7 @@ impl eframe::App for App {
         }
         let title = with_app(|fig| {
             self.apply_control_action(fig, ctx);
+            self.drive_agent(fig);
             control_server::drain_queue(&self.queue, &mut fig.control_queue);
             // Phase-safe background work: control queues, autosave/recovery deadlines, live polling.
             // It runs on logic-only callbacks too, so it never reads UI input.
@@ -353,6 +385,7 @@ fn main() -> eframe::Result {
                 log::warn!("app menu: kept winit's Quit, which ends the app without asking: {e}");
             }
             Ok(Box::new(App {
+                agent: agent::Agent::new(ctx_slot.clone()),
                 queue,
                 control,
                 ctx_slot,
