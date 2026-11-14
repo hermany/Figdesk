@@ -2277,7 +2277,11 @@ With the channel on, the AI tab is a chat. Each prompt runs the user's own `clau
 key) with this app's MCP server attached, so the agent designs in the open document. The conversation
 continues across prompts (`--resume`). The layers selected on the page show as chips in the box and are
 sent with the prompt (ids and quoted names, marked as data), and the model is picked from a list (the
-default is the one the user's own setup uses). The agent gets only the MCP design tools: its own file,
+default is the one the user's own setup uses). On a whiteboard (`file.newBoard`) the chat's starting points are a flow, sticky notes and a mind map, and
+each prompt tells the agent which `board.*` commands make notes, shapes with text, connectors, mind maps and
+templates, and to finish with `view.zoomFit`. The agent's Markdown bold shows as bold, and the chat's text
+can be selected and copied.
+The agent gets only the MCP design tools: its own file,
 shell and web tools are off, and `open_file`, `save_file` and `export` are refused. `run_command` can
 still reach file commands, because an attached app does not confine them. The model list also has **Codex**: the chat then
 runs `codex exec` instead, alone (`--ignore-user-config`: the user's own Codex plugins and tools, Computer
