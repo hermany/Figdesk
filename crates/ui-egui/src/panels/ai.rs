@@ -33,6 +33,14 @@ impl Client {
     }
 }
 
+/// What the switch asks of the app, which owns the control server (`apps/figcraft`): it carries the
+/// request out on its next frame and reports the port, or the failure, back in `FigApp::ui`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Start,
+    Stop,
+}
+
 /// What the tab remembers between frames.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AiState {
@@ -108,7 +116,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 }
 
 /// The line that says whether the control channel the MCP server attaches to is listening.
-fn status(app: &FigApp, ui: &mut Ui, w: f32) {
+fn status(app: &mut FigApp, ui: &mut Ui, w: f32) {
     let t = Tokens::get(ui.ctx());
     let (text, on) = match app.ui.control_port {
         Some(port) => (format!("{} 127.0.0.1:{port}", tr("Listening on")), true),
@@ -118,9 +126,15 @@ fn status(app: &FigApp, ui: &mut Ui, w: f32) {
     let dot = if on { t.accent } else { t.text_tertiary };
     ui.painter().circle_filled(pos2(r.min.x + 5.0, r.center().y), 4.0, dot);
     ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, text, semibold(12.0), t.text);
-    if !on {
-        let hint = format!("{} figcraft --control {DEFAULT_PORT}", tr("Start the app with"));
-        wrapped(ui, &hint, w, regular(11.0), t.text_secondary);
+    ui.add_space(6.0);
+    let label = if on { tr("Turn off") } else { tr("Turn on") };
+    if text_button(ui, label, w.min(96.0)) {
+        app.ui.control_action = Some(if on { Action::Stop } else { Action::Start });
+        app.ui.control_error = None;
+    }
+    if let Some(error) = app.ui.control_error.clone() {
+        ui.add_space(6.0);
+        wrapped(ui, &error, w, regular(11.0), t.text_secondary);
     }
 }
 

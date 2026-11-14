@@ -513,3 +513,33 @@ fn events_poll_reports_reset_for_a_cursor_ahead_of_the_log() {
     reader.get_ref().shutdown(Shutdown::Write).unwrap();
     worker.join().unwrap().unwrap();
 }
+
+fn free_server() -> Handle {
+    start_handle(0, Duration::ZERO, queue(), context(), Arc::new(EventLog::default())).expect("a free port to listen on")
+}
+
+#[test]
+fn a_stopped_server_closes_its_connections_and_frees_the_port() {
+    let server = free_server();
+    let port = server.port();
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    client.write_all(b"{\"id\":1,\"method\":\"events.poll\",\"params\":{\"timeoutMs\":0}}\n").unwrap();
+    assert_eq!(reply(&mut BufReader::new(client.try_clone().unwrap()))["ok"], true, "it serves while running");
+    server.stop();
+    let mut rest = Vec::new();
+    assert_eq!(client.read_to_end(&mut rest).unwrap_or(0), 0, "the open connection is closed");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while TcpListener::bind(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < deadline, "the port is still held after stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_busy_port_is_reported_not_taken() {
+    let holder = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = holder.local_addr().unwrap().port();
+    let error = start_handle(port, Duration::ZERO, queue(), context(), Arc::new(EventLog::default())).err().expect("the port is taken");
+    assert!(error.contains(&port.to_string()), "{error}");
+}

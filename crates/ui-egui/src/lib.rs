@@ -444,6 +444,10 @@ pub struct UiState {
     /// The port the control channel listens on (`--control`), if it does: the AI tab says so.
     pub control_port: Option<u16>,
     pub ai: ai::AiState,
+    /// A start or stop of the control channel asked for by the AI tab, for the app to carry out.
+    pub control_action: Option<ai::Action>,
+    /// Why the last start failed, for the AI tab.
+    pub control_error: Option<String>,
     pub pages_open: bool,
     /// Pages panel search: open, and the case-insensitive name filter.
     pub page_search: bool,
@@ -671,6 +675,8 @@ impl Default for UiState {
             left_tab: LeftTab::File,
             control_port: None,
             ai: ai::AiState::default(),
+            control_action: None,
+            control_error: None,
             pages_open: true,
             page_search: false,
             page_filter: String::new(),

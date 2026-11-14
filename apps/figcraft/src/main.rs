@@ -58,6 +58,8 @@ use serde_json::json;
 /// The app state lives in [`figcraft_ui_egui::windows`] (other windows draw it too).
 struct App {
     queue: Arc<Mutex<Vec<ControlRequest>>>,
+    /// The running control server, when there is one: started by `--control` or the AI tab's switch.
+    control: Option<control_server::Handle>,
     ctx_slot: Arc<Mutex<Option<egui::Context>>>,
     /// The window title last sent: a viewport command asks for another frame, so it's only sent
     /// when the title changes (sending it every frame kept an idle window redrawing).
@@ -69,6 +71,46 @@ struct App {
     /// Documents and quit requests from Finder, the Dock and Open With.
     #[cfg(target_os = "macos")]
     apple_events: fmv_macos_events::Inbox,
+}
+
+impl App {
+    /// Carry out the AI tab's request to start or stop the control server. A start tries the usual
+    /// port (what a saved client configuration names), then any free one; the tab reads the port or
+    /// the failure from `fig.ui`.
+    fn apply_control_action(&mut self, fig: &mut FigApp, ctx: &egui::Context) {
+        use figcraft_ui_egui::ai::{Action, DEFAULT_PORT};
+        match fig.ui.control_action.take() {
+            Some(Action::Stop) => {
+                if let Some(server) = self.control.take() {
+                    server.stop();
+                }
+                fig.ui.control_port = None;
+            }
+            Some(Action::Start) if self.control.is_none() => {
+                let start = |port| {
+                    control_server::start_handle(
+                        port,
+                        std::time::Duration::ZERO,
+                        self.queue.clone(),
+                        self.ctx_slot.clone(),
+                        fig.session.events.clone(),
+                    )
+                };
+                match start(DEFAULT_PORT).or_else(|_| start(0)) {
+                    Ok(server) => {
+                        fig.ui.control_port = Some(server.port());
+                        fig.ui.control_error = None;
+                        self.control = Some(server);
+                    }
+                    Err(e) => fig.ui.control_error = Some(e),
+                }
+            }
+            Some(Action::Start) | None => {}
+        }
+        if fig.ui.control_action.is_some() || self.control.is_some() != fig.ui.control_port.is_some() {
+            ctx.request_repaint();
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -83,6 +125,7 @@ impl eframe::App for App {
             }
         }
         let title = with_app(|fig| {
+            self.apply_control_action(fig, ctx);
             control_server::drain_queue(&self.queue, &mut fig.control_queue);
             // Phase-safe background work: control queues, autosave/recovery deadlines, live polling.
             // It runs on logic-only callbacks too, so it never reads UI input.
@@ -254,8 +297,10 @@ fn main() -> eframe::Result {
     }
     let queue: Arc<Mutex<Vec<ControlRequest>>> = Arc::new(Mutex::new(Vec::new()));
     fig.ui.control_port = port;
-    if let Some(p) = port {
-        control_server::start(p, graphics::port_wait(), queue.clone(), ctx_slot.clone(), fig.session.events.clone());
+    let control =
+        port.and_then(|p| control_server::start_handle(p, graphics::port_wait(), queue.clone(), ctx_slot.clone(), fig.session.events.clone()).ok());
+    if port.is_some() && control.is_none() {
+        fig.ui.control_port = None;
     }
     let icon = services::window_icon();
     // The app id is the Wayland app_id and the X11 window class on Linux: the desktop entry's name
@@ -309,6 +354,7 @@ fn main() -> eframe::Result {
             }
             Ok(Box::new(App {
                 queue,
+                control,
                 ctx_slot,
                 title: String::new(),
                 recovery,

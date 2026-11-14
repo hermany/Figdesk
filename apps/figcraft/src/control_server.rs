@@ -2,7 +2,8 @@
 //! thread; the reply line `{"id", "ok", "result" | "error"}` is written when the frame handled it.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -103,25 +104,71 @@ pub fn bind(port: u16, busy: Duration) -> std::io::Result<TcpListener> {
     }
 }
 
-pub fn start(port: u16, busy: Duration, queue: Queue, ctx: CtxSlot, events: Arc<EventLog>) {
-    let listener = match bind(port, busy) {
-        Ok(l) => l,
-        Err(e) => {
-            log::error!("control server: can't bind 127.0.0.1:{port}: {e} (another app may own it; pick another port)");
-            eprintln!("FigCraft control server failed to bind port {port}: {e}");
-            return;
-        }
-    };
-    eprintln!("FigCraft control server listening on 127.0.0.1:{port}");
-    let spawned = std::thread::Builder::new().name("figcraft-control".into()).spawn(move || {
-        let mut workers = Vec::new();
-        for stream in accepted(listener.incoming(), || std::thread::sleep(ACCEPT_RETRY)) {
-            spawn_connection(stream, queue.clone(), ctx.clone(), events.clone(), &mut workers, TIMEOUT);
-        }
-    });
-    if let Err(e) = spawned {
-        log::error!("control server thread: {e}");
+/// A running control server: [`Handle::stop`] ends it (the AI tab's switch), closing its open
+/// connections and freeing the port.
+pub struct Handle {
+    port: u16,
+    stop: Arc<AtomicBool>,
+    open: Arc<Mutex<Vec<TcpStream>>>,
+}
+
+impl Handle {
+    /// The port it listens on (the one asked for, or the free one the system picked for port 0).
+    pub fn port(&self) -> u16 {
+        self.port
     }
+
+    /// Stop accepting, close every open connection and release the port. A request an open
+    /// connection had queued still runs on the UI thread, but nobody reads its reply.
+    pub fn stop(self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let mut open = self.open.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for stream in open.drain(..) {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
+    }
+}
+
+/// Start the control server on `port`; the [`Handle`] stops it, or the error says why it could not listen.
+pub fn start_handle(port: u16, busy: Duration, queue: Queue, ctx: CtxSlot, events: Arc<EventLog>) -> Result<Handle, String> {
+    let listener = bind(port, busy).map_err(|e| {
+        log::error!("control server: can't bind 127.0.0.1:{port}: {e} (another app may own it; pick another port)");
+        format!("can't listen on 127.0.0.1:{port}: {e}")
+    })?;
+    let bound = listener.local_addr().map_or(port, |a| a.port());
+    // A non-blocking listener lets the accepting thread notice a stop between connections.
+    listener.set_nonblocking(true).map_err(|e| format!("control server: {e}"))?;
+    eprintln!("FigCraft control server listening on 127.0.0.1:{bound}");
+    let stop = Arc::new(AtomicBool::new(false));
+    let open: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
+    let (stopped, registry) = (stop.clone(), open.clone());
+    std::thread::Builder::new()
+        .name("figcraft-control".into())
+        .spawn(move || {
+            let mut workers = Vec::new();
+            // The listener is non-blocking, so each failed accept (nothing waiting included) pauses
+            // [`ACCEPT_RETRY`] and the loop sees a stop within that.
+            let incoming = std::iter::from_fn(|| (!stopped.load(Ordering::SeqCst)).then(|| listener.accept().map(|(stream, _)| stream)));
+            for stream in accepted(incoming, || std::thread::sleep(ACCEPT_RETRY)) {
+                // The accepted socket is served with blocking reads and its own timeouts.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
+                {
+                    let mut open = registry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    open.retain(|s| s.peer_addr().is_ok());
+                    if let Ok(copy) = stream.try_clone() {
+                        open.push(copy);
+                    }
+                }
+                spawn_connection(stream, queue.clone(), ctx.clone(), events.clone(), &mut workers, TIMEOUT);
+            }
+        })
+        .map_err(|e| {
+            log::error!("control server thread: {e}");
+            format!("control server thread: {e}")
+        })?;
+    Ok(Handle { port: bound, stop, open })
 }
 
 /// The connections `incoming` accepts, calling `wait` after each failed accept.

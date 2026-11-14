@@ -2260,3 +2260,12 @@ The end-to-end tests in `crates/mcp/tests/it/agent_tasks.rs` are worked examples
 (auto layout, a card built in one batch with step references, components and overrides, gradients
 and shadows, paint styles, Light/Dark variables, align/distribute/group, boolean subtract + flatten,
 export, undo/redo, drawing with tools).
+
+### The AI tab
+
+The left sidebar's **AI** tab starts and stops the control channel while the app runs (no `--control`
+flag needed) and shows what to paste into Claude Code, Codex or any other MCP client:
+`figcraft-cli mcp --attach <port>`. Turning it on listens on 7979, or on a free port when that one is
+taken; the tab shows the port in use. Turning it off closes every open connection and frees the port.
+The `--automation-*` roots don't apply to an attached server (the app confines it), so the tab
+doesn't offer them.
