@@ -55,15 +55,14 @@ The first time a folder is used the app also copies `.agent/prompt.md` (what the
 `.agent/design.md` (stack, styling, structure) and `.agent/agent.md` (how the AI works) into it, and never
 over a file that exists. Each starts with `status: default`. While any of the three says that, a run
 makes the AI ask the person for the base prompt and the agent and design guidelines before it builds
-anything, offering the standard: React Native with Expo and TypeScript, styled with Tailwind through
-NativeWind. The AI writes the answer into the files and sets `status: confirmed`; later runs build without
+anything, offering the standard: React with TypeScript and Vite, styled with Tailwind CSS. The AI writes the answer into the files and sets `status: confirmed`; later runs build without
 asking.
 
 Frames of the same size and structure inside a smart section are one screen in different states: the AI
 builds one screen and changes the elements that differ, not separate pages.
 
 Mode documents carry a `version` in their front matter. A document from an older app (no version, or a lower
-one) is kept as `<mode>.md.bak` and replaced by the current one, once; a document with the current
+one) is kept as `<mode>.md.v<N>.bak` and replaced by the current one; a document with the current
 version is never touched. While the base documents are not confirmed, Play sends only the questions (the
 mode document is not handed over), so nothing is built before the person has answered; the stack in
 `.agent/design.md` wins over the mode document's.

@@ -91,8 +91,8 @@ pub fn ensure_prompts(work_dir: &Path) -> std::io::Result<()> {
         if !path.exists() {
             std::fs::write(path, doc)?;
         } else if version_of(&read_doc(&path).unwrap_or_default()) < version_of(doc) {
-            // A document from an older app: keep it as `<mode>.md.bak` (once) and put the current one.
-            let bak = dir.join(format!("{id}.md.bak"));
+            // A document from an older app: keep it as `<mode>.md.v<N>.bak` and put the current one.
+            let bak = dir.join(format!("{id}.md.v{}.bak", version_of(&read_doc(&path).unwrap_or_default())));
             if !bak.exists() && std::fs::rename(&path, &bak).is_ok() {
                 std::fs::write(&path, doc)?;
             }
@@ -177,7 +177,7 @@ pub fn build_prompt(doc: &str, mode: &str, id: u64, name: &str, work_dir: &Path,
     );
     let rules = format!(
         "Rules from {AGENT_FOLDER}/ that win over the mode document: the stack is the one in {AGENT_FOLDER}/design.md \
-         (the standard there is React Native, Expo, TypeScript, Tailwind through NativeWind, never plain HTML unless it says so), \
+         (the standard there is React, TypeScript, Vite, Tailwind CSS, never plain HTML unless it says so), \
          and frames of the same size and structure are ONE screen in different states, never separate pages."
     );
     if !confirmed {
@@ -231,7 +231,7 @@ mod tests {
             assert!(text.starts_with("---\nstatus: default\n---"), "{file} starts unconfirmed");
         }
         let design = std::fs::read_to_string(dir.join(".agent/design.md")).expect("design");
-        assert!(design.contains("NativeWind") && design.contains("React Native"));
+        assert!(design.contains("Tailwind CSS") && design.contains("plain React"));
         let agent = std::fs::read_to_string(dir.join(".agent/agent.md")).expect("agent");
         assert!(agent.contains("status: confirmed") && agent.contains("ONE screen"));
         std::fs::write(dir.join(".agent/design.md"), "mine").expect("edit");
@@ -245,10 +245,14 @@ mod tests {
         let dir = temp("ensure");
         ensure_prompts(&dir).expect("copied");
         assert!(dir.join("prompts/web.md").is_file() && dir.join("prompts/general.md").is_file());
-        std::fs::write(dir.join("prompts/web.md"), "---\nversion: 2\ntitle: Mi web\n---\nmine").expect("edit");
+        std::fs::write(dir.join("prompts/web.md"), "---\nversion: 3\ntitle: Mi web\n---\nmine").expect("edit");
         std::fs::remove_file(dir.join("prompts/document.md")).expect("remove");
         ensure_prompts(&dir).expect("again");
-        assert_eq!(std::fs::read_to_string(dir.join("prompts/web.md")).expect("read"), "---\nversion: 2\ntitle: Mi web\n---\nmine", "the project's edit stays");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("prompts/web.md")).expect("read"),
+            "---\nversion: 3\ntitle: Mi web\n---\nmine",
+            "the project's edit stays"
+        );
         assert!(dir.join("prompts/document.md").is_file(), "a missing one comes back");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -309,8 +313,8 @@ mod tests {
         assert!(!confirmed(&dir));
         std::fs::write(dir.join("prompts/web.md"), "---\ntitle: Web\nstack: HTML5\n---\nold").expect("old");
         ensure_prompts(&dir).expect("upgraded");
-        assert_eq!(std::fs::read_to_string(dir.join("prompts/web.md.bak")).expect("bak"), "---\ntitle: Web\nstack: HTML5\n---\nold");
-        assert!(std::fs::read_to_string(dir.join("prompts/web.md")).expect("new").contains("version: 2"));
+        assert_eq!(std::fs::read_to_string(dir.join("prompts/web.md.v1.bak")).expect("bak"), "---\ntitle: Web\nstack: HTML5\n---\nold");
+        assert!(std::fs::read_to_string(dir.join("prompts/web.md")).expect("new").contains("version: 3"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -13,7 +13,7 @@ How the AI works in this project. Change any line; the AI follows it as written.
    - the base prompt: what the project is, who it is for, what it must do;
    - the agent guidelines: how you should work (language, how much to ask, what never to touch);
    - the design guidelines: stack, styling, structure.
-   Offer the standard in `design.md` (React Native, Expo, TypeScript, Tailwind through NativeWind) as the
+   Offer the standard in `design.md` (React, TypeScript, Vite, Tailwind CSS) as the
    answer to give when they do not know or do not care, and wait for the answer.
 3. When they answer, write it into the three files (keep their headings), change `status: default` to
    `status: confirmed` in each, and only then build. If they say to use the standard, keep the standard

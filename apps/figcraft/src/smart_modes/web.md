@@ -1,8 +1,8 @@
 ---
-version: 2
+version: 3
 title: Web
 output: web
-stack: the one in .agent/design.md (standard: React Native, Expo, TypeScript, Tailwind through NativeWind)
+stack: the one in .agent/design.md (standard: React, TypeScript, Vite, Tailwind CSS)
 responsive: true
 language: the language of the texts in the section
 ---
@@ -18,8 +18,8 @@ written.
 
 - **output**: the folder, inside the work folder, that gets the site. Create it if it does not exist.
 - **stack**: what the site is made with: the one in `.agent/design.md`. When that file has none chosen, the
-  standard: React Native with Expo and TypeScript, styled with Tailwind through NativeWind, for the web
-  through `react-native-web`. Plain HTML and CSS only when the person asks for it.
+  standard: React with TypeScript and Vite, styled with Tailwind CSS. Plain HTML and CSS only when the
+  person asks for it.
 - **responsive**: when true, the page works from a phone to a wide desktop screen (fluid widths, CSS grid
   or flexbox, a media query where the layout must change).
 - **language**: the language of the page's text. Keep the section's own words as they are.
@@ -43,9 +43,10 @@ Where this document and `.agent/design.md` disagree (the stack above all), `.age
    for pictures), and refer to them with relative paths.
 5. Build it with the stack. For plain HTML write `<output>/index.html` (semantic elements: `header`, `nav`, `main`, `section`, `footer`, one `h1`,
    real `a` and `button` elements, `alt` text on every image, `lang` on `html`) and `<output>/styles.css`.
-   Add a `<output>/script.js` only when the design needs behaviour. With the React Native stack, screens
-   go in `<output>/app/` and parts that repeat in `<output>/src/components/`, with the colours and fonts in
-   `tailwind.config.js`. Frames of the same size and structure are one screen in different states.
+   Add a `<output>/script.js` only when the design needs behaviour. With the React stack, screens go in
+   `<output>/src/pages/` and parts that repeat in `<output>/src/components/`, with the colours and fonts in
+   `tailwind.config.js`, and `package.json`, `index.html` and `vite.config.ts` complete so `npm install` and
+   `npm run dev` work. Frames of the same size and structure are one screen in different states.
 6. Do not load anything from the internet: no CDN, no web fonts from a server. Use the fonts that the
    design names through `font-family` stacks with sensible fallbacks.
 7. Check your work: open the files you wrote and read them again against the screenshot; fix what does

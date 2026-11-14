@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 3
 title: Document
 output: docs
 stack: Markdown
