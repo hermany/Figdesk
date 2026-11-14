@@ -49,6 +49,16 @@ pub fn default_modes() -> Vec<Mode> {
     DEFAULTS.iter().map(|(id, doc)| Mode { id: (*id).to_string(), title: title_of(doc, id) }).collect()
 }
 
+/// The work folder a smart section makes for itself when the project has none: `Figdesk` in the
+/// person's documents folder (their home when there is none). `None` when it can't be made.
+pub fn default_work_dir() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|h| !h.is_empty())?);
+    let docs = home.join("Documents");
+    let dir = if docs.is_dir() { docs } else { home }.join("Figdesk");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
 fn prompts_dir(work_dir: &Path) -> PathBuf {
     work_dir.join(FOLDER)
 }

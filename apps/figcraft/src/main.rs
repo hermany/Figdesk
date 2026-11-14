@@ -123,10 +123,18 @@ impl App {
             fig.ui.chat.add_note("The AI is still answering: run the section again when it is done.");
             return;
         }
-        let Some(work) = dir.as_deref().map(Path::new) else {
-            fig.ui.chat.add_note("Choose a work folder first: a smart section builds what it makes there. The field is in the AI tab's Setup.");
+        // No work folder yet: make the standard one so Play works at once.
+        let made = if dir.is_none() { smart::default_work_dir() } else { None };
+        let Some(work) = dir.as_deref().map(Path::new).or(made.as_deref()) else {
+            fig.ui.chat.add_note("Could not make a work folder: choose one in the AI tab's Setup.");
             return;
         };
+        if made.is_some() {
+            fig.session.prefs.ai_work_dir = Some(work.to_string_lossy().into_owned());
+            fig.services.save_prefs(&fig.session.prefs);
+            fig.ui.smart_refresh = true;
+            fig.ui.chat.add_note(&format!("Work folder made at {}. The standard prompt documents are in its prompts folder: edit them to change what a mode does.", work.display()));
+        }
         let prompt = smart::ensure_prompts(work)
             .map_err(|e| format!("could not prepare {}: {e}", work.join(smart::FOLDER).display()))
             .and_then(|()| smart::load(work, &mode));
