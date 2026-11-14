@@ -1,7 +1,7 @@
 ---
 title: Web
 output: web
-stack: HTML5 and CSS3, no build step, no framework
+stack: the one in .agent/design.md (standard: React Native, Expo, TypeScript, Tailwind through NativeWind)
 responsive: true
 language: the language of the texts in the section
 ---
@@ -16,7 +16,9 @@ Edit these to change what every web run of this project does. Keep a line short;
 written.
 
 - **output**: the folder, inside the work folder, that gets the site. Create it if it does not exist.
-- **stack**: what the site is made with. Plain HTML and CSS unless it says otherwise.
+- **stack**: what the site is made with: the one in `.agent/design.md`. When that file has none chosen, the
+  standard: React Native with Expo and TypeScript, styled with Tailwind through NativeWind, for the web
+  through `react-native-web`. Plain HTML and CSS only when the person asks for it.
 - **responsive**: when true, the page works from a phone to a wide desktop screen (fluid widths, CSS grid
   or flexbox, a media query where the layout must change).
 - **language**: the language of the page's text. Keep the section's own words as they are.
@@ -31,9 +33,11 @@ written.
 3. Export every picture the design needs (photos, icons, illustrations, logos) from its layers into
    `<output>/assets/` with the `export` tool, in the format that suits it (SVG for vectors, PNG or WebP
    for pictures), and refer to them with relative paths.
-4. Write `<output>/index.html` (semantic elements: `header`, `nav`, `main`, `section`, `footer`, one `h1`,
+4. Build it with the stack. For plain HTML write `<output>/index.html` (semantic elements: `header`, `nav`, `main`, `section`, `footer`, one `h1`,
    real `a` and `button` elements, `alt` text on every image, `lang` on `html`) and `<output>/styles.css`.
-   Add a `<output>/script.js` only when the design needs behaviour.
+   Add a `<output>/script.js` only when the design needs behaviour. With the React Native stack, screens
+   go in `<output>/app/` and parts that repeat in `<output>/src/components/`, with the colours and fonts in
+   `tailwind.config.js`. Frames of the same size and structure are one screen in different states.
 5. Do not load anything from the internet: no CDN, no web fonts from a server. Use the fonts that the
    design names through `font-family` stacks with sensible fallbacks.
 6. Check your work: open the files you wrote and read them again against the screenshot; fix what does

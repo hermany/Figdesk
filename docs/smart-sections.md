@@ -48,3 +48,16 @@ name is quoted and marked as data, not instruction.
 The agent works with the same rules as the AI tab's chat: the work folder is the only place it may read or
 write files, through the MCP server's path check and the permission rules of each CLI (`docs/mcp.md`).
 Play is not available while the agent is answering another prompt.
+
+## The project's base documents (`.agent/`)
+
+The first time a folder is used the app also copies `.agent/prompt.md` (what the project is),
+`.agent/design.md` (stack, styling, structure) and `.agent/agent.md` (how the AI works) into it, and never
+over a file that exists. Each starts with `status: default`. While any of the three says that, a run
+makes the AI ask the person for the base prompt and the agent and design guidelines before it builds
+anything, offering the standard: React Native with Expo and TypeScript, styled with Tailwind through
+NativeWind. The AI writes the answer into the files and sets `status: confirmed`; later runs build without
+asking.
+
+Frames of the same size and structure inside a smart section are one screen in different states: the AI
+builds one screen and changes the elements that differ, not separate pages.

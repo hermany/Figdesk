@@ -133,7 +133,7 @@ impl App {
             fig.session.prefs.ai_work_dir = Some(work.to_string_lossy().into_owned());
             fig.services.save_prefs(&fig.session.prefs);
             fig.ui.smart_refresh = true;
-            fig.ui.chat.add_note(&format!("Work folder made at {}. The standard prompt documents are in its prompts folder: edit them to change what a mode does.", work.display()));
+            fig.ui.chat.add_note(&format!("Work folder made at {}. The AI's base documents are in its .agent folder (prompt.md, design.md, agent.md) and the mode prompts in prompts: edit them to change what it does. The AI asks for the project's guidelines before it builds.", work.display()));
         }
         let prompt = smart::ensure_prompts(work)
             .map_err(|e| format!("could not prepare {}: {e}", work.join(smart::FOLDER).display()))
