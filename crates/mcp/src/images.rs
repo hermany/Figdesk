@@ -6,12 +6,14 @@
 //! picture comes back as base64 and is placed with `image.place {data}`.
 
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
 use crate::tools::ToolResult;
+use crate::workdir::WorkDir;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "gpt-image-1";
@@ -125,10 +127,35 @@ pub fn request_image(api: &ImageApi, prompt: &str, size: &str, transparent: bool
 /// `generate_image {prompt, size?, transparent?, name?, x?, y?, width?, height?, parent?}`: make the
 /// picture, then place it.
 pub fn generate_image(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, String> {
-    generate_image_with(b, a, &ImageApi::from_env()?)
+    let work = match crate::workdir::current() {
+        Some(Ok(w)) => Some(w),
+        Some(Err(e)) => return Err(e.clone()),
+        None => None,
+    };
+    generate_image_with(b, a, &ImageApi::from_env()?, work)
 }
 
-pub fn generate_image_with(b: &mut dyn Backend, a: &Map<String, Value>, api: &ImageApi) -> Result<ToolResult, String> {
+/// A file name for a picture of `prompt`: its words, lowercase and joined by dashes, then `stamp`.
+fn picture_name(prompt: &str, stamp: u64) -> String {
+    let words: String = prompt.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let slug = words.split('-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("-");
+    let slug: String = slug.chars().take(40).collect();
+    format!("{}-{stamp}.png", if slug.is_empty() { "image" } else { slug.trim_end_matches('-') })
+}
+
+/// Keep the picture in the work folder's `images` folder; where it went.
+fn save_picture(work: &WorkDir, prompt: &str, base64_png: &str) -> Result<PathBuf, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(base64_png).map_err(|e| format!("the picture could not be decoded: {e}"))?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let folder = work.root().join("images");
+    std::fs::create_dir_all(&folder).map_err(|e| format!("could not make {}: {e}", folder.display()))?;
+    let path = work.resolve(&folder.join(picture_name(prompt, stamp)).to_string_lossy())?;
+    std::fs::write(&path, bytes).map_err(|e| format!("could not save the picture to {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+pub fn generate_image_with(b: &mut dyn Backend, a: &Map<String, Value>, api: &ImageApi, work: Option<&WorkDir>) -> Result<ToolResult, String> {
     let prompt: String = a
         .get("prompt")
         .and_then(Value::as_str)
@@ -144,13 +171,17 @@ pub fn generate_image_with(b: &mut dyn Backend, a: &Map<String, Value>, api: &Im
     }
     let transparent = a.get("transparent").and_then(Value::as_bool).unwrap_or(false);
     let data = request_image(api, &prompt, size, transparent)?;
+    let saved = work.map(|w| save_picture(w, &prompt, &data)).transpose()?;
     let mut params = json!({"data": data, "name": a.get("name").and_then(Value::as_str).unwrap_or("Generated image")});
     for key in ["x", "y", "width", "height", "parent"] {
         if let (Some(v), Some(o)) = (a.get(key).filter(|v| !v.is_null()), params.as_object_mut()) {
             o.insert(key.into(), v.clone());
         }
     }
-    let placed = b.call("engine.execute", json!({"command": "image.place", "params": params}))?;
+    let mut placed = b.call("engine.execute", json!({"command": "image.place", "params": params}))?;
+    if let (Some(path), Some(o)) = (saved, placed.as_object_mut()) {
+        o.insert("savedTo".into(), json!(path.to_string_lossy()));
+    }
     Ok(ToolResult::json(&placed))
 }
 
@@ -259,7 +290,7 @@ mod tests {
         let (url, server) = serve_once(json!({"data": [{"b64_json": PNG}]}).to_string());
         let mut backend = crate::headless::Headless::new();
         let args = json!({"prompt": "a fox", "name": "Fox", "width": 64, "height": 64}).as_object().cloned().unwrap_or_default();
-        let result = generate_image_with(&mut backend, &args, &api(&url)).expect("placed");
+        let result = generate_image_with(&mut backend, &args, &api(&url), None).expect("placed");
         let _ = server.join();
         assert!(!result.is_error, "{}", result.first_text());
         let placed: Value = serde_json::from_str(result.first_text()).expect("json");
@@ -267,11 +298,38 @@ mod tests {
     }
 
     #[test]
+    fn pictures_get_a_readable_name_from_their_prompt() {
+        assert_eq!(picture_name("A red  fox, in the snow!", 7), "a-red-fox-in-the-snow-7.png");
+        assert_eq!(picture_name("¡¿?!", 7), "image-7.png");
+        assert!(picture_name(&"palabra ".repeat(20), 1).len() <= 40 + 12);
+    }
+
+    #[test]
+    fn with_a_work_folder_the_picture_is_kept_there_and_placed() {
+        if !curl_available() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("figdesk-images-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create");
+        let work = WorkDir::new(&dir).expect("work dir");
+        let (url, server) = serve_once(json!({"data": [{"b64_json": PNG}]}).to_string());
+        let mut backend = crate::headless::Headless::new();
+        let args = json!({"prompt": "a fox"}).as_object().cloned().unwrap_or_default();
+        let result = generate_image_with(&mut backend, &args, &api(&url), Some(&work)).expect("placed");
+        let _ = server.join();
+        let placed: Value = serde_json::from_str(result.first_text()).expect("json");
+        let saved = PathBuf::from(placed["savedTo"].as_str().expect("savedTo"));
+        assert!(saved.starts_with(work.root().join("images")) && saved.is_file(), "{saved:?}");
+        assert!(placed.get("id").is_some(), "{placed}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_missing_prompt_or_a_wrong_size_is_refused_before_any_request() {
         let mut backend = crate::headless::Headless::new();
         let none = Map::new();
-        assert!(generate_image_with(&mut backend, &none, &api("http://127.0.0.1:9")).is_err());
+        assert!(generate_image_with(&mut backend, &none, &api("http://127.0.0.1:9"), None).is_err());
         let bad = json!({"prompt": "x", "size": "5x5"}).as_object().cloned().unwrap_or_default();
-        assert!(generate_image_with(&mut backend, &bad, &api("http://127.0.0.1:9")).expect_err("size").contains("size"));
+        assert!(generate_image_with(&mut backend, &bad, &api("http://127.0.0.1:9"), None).expect_err("size").contains("size"));
     }
 }

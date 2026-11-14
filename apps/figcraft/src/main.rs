@@ -101,8 +101,16 @@ impl App {
                 Some(p) => Ok(p),
                 None => self.start_control(fig),
             };
-            let started =
-                port.and_then(|p| self.agent.send(request.provider, &request.prompt, fig.ui.chat.session_for(request.provider), p, request.model));
+            let started = port.and_then(|p| {
+                self.agent.send(
+                    request.provider,
+                    &request.prompt,
+                    fig.ui.chat.session_for(request.provider),
+                    p,
+                    request.model,
+                    fig.session.prefs.ai_work_dir.as_deref().map(std::path::Path::new),
+                )
+            });
             if let Err(e) = started {
                 fig.ui.chat.finish(Some(&e));
             }

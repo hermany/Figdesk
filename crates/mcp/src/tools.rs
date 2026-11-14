@@ -563,6 +563,16 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         Ok(a) => a,
         Err(e) => return ToolResult::error(e),
     };
+    // With a work folder (the AI tab's), every file path the call carries must be inside it.
+    match crate::workdir::current() {
+        Some(Ok(work)) => {
+            if let Err(e) = work.guard(name, &mut a) {
+                return ToolResult::error(e);
+            }
+        }
+        Some(Err(e)) => return ToolResult::error(e.clone()),
+        None => {}
+    }
     // Built once: the catalogue is the same on every call.
     static TOOLS: std::sync::LazyLock<Vec<Value>> = std::sync::LazyLock::new(tool_definitions);
     if let Some(schema) = TOOLS.iter().find(|t| t.get("name").and_then(Value::as_str) == Some(name)).and_then(|t| t.get("inputSchema"))

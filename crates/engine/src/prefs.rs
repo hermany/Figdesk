@@ -85,6 +85,9 @@ pub struct Prefs {
     /// Recently opened or saved files, newest first (File ▸ Open recent; at most
     /// [`cmd::file::MAX_RECENT`]).
     pub recent_files: Vec<String>,
+    /// The AI tab's work folder: the AI agent works in it, and the files it makes or saves stay in it
+    /// (`None`: it works in a temporary folder and may not open, save or export files).
+    pub ai_work_dir: Option<String>,
     /// The files you put on a server without its key, with their owner tokens (passwords: see
     /// [`online`]), most recently opened first, at most [`online::MAX_ONLINE_FILES`].
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "online::read")]
@@ -155,6 +158,7 @@ impl Default for Prefs {
             plugin_directory: None,
             publish_server: live::DEFAULT_SERVER.into(),
             recent_files: Vec::new(),
+            ai_work_dir: None,
             online_files: Vec::new(),
             getting_started_dismissed: false,
             link_notice_skipped: false,

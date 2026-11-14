@@ -171,29 +171,77 @@ struct Call<'a> {
     model: Option<&'a str>,
     /// The key is in the environment of the command (it never goes on the command line).
     has_key: bool,
+    /// The AI tab's work folder, an existing folder: the agent works in it and its files stay in it.
+    work_dir: Option<&'a Path>,
 }
 
-/// Where the agent works from: not the user's project, only the design.
-fn work_dir() -> PathBuf {
-    std::env::temp_dir()
+/// Where the agent works from: the work folder, else a temporary one (not the user's project).
+fn start_dir(call: &Call) -> PathBuf {
+    call.work_dir.map_or_else(std::env::temp_dir, Path::to_path_buf)
+}
+
+/// What the agent is told about its folder.
+fn folder_note(call: &Call) -> String {
+    call.work_dir.map_or_else(String::new, |dir| {
+        format!(
+            " Your work folder is {}: save everything you make there (exports, text files, code). generate_image keeps its pictures in its images folder. You may not use files outside it.",
+            dir.display()
+        )
+    })
+}
+
+/// Claude's permission rules that let it read and write files in `dir` and nowhere else
+/// (`//` starts a path at the root of the file system). None where paths aren't written that way.
+fn file_rules(dir: &Path) -> Option<Vec<String>> {
+    if !cfg!(unix) {
+        return None;
+    }
+    let real = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let pattern = format!("//{}/**", real.to_string_lossy().trim_start_matches('/'));
+    Some(vec![format!("Read({pattern})"), format!("Edit({pattern})")])
 }
 
 fn claude_command(program: &Path, call: &Call) -> Command {
     let mut server = json!({"command": call.cli, "args": ["mcp", "--attach", call.port.to_string()]});
-    if call.has_key
+    let mut env = serde_json::Map::new();
+    if call.has_key {
+        env.insert("OPENAI_API_KEY".into(), json!("${OPENAI_API_KEY}"));
+    }
+    if let Some(dir) = call.work_dir {
+        env.insert("FIGDESK_WORK_DIR".into(), json!(dir));
+    }
+    if !env.is_empty()
         && let Some(o) = server.as_object_mut()
     {
-        o.insert("env".into(), json!({"OPENAI_API_KEY": "${OPENAI_API_KEY}"}));
+        o.insert("env".into(), Value::Object(env));
     }
     let mcp = json!({"mcpServers": {MCP_NAME: server}});
     let mut c = Command::new(program);
-    c.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"])
-        .args(["--mcp-config", &mcp.to_string(), "--strict-mcp-config"])
-        .args(["--tools", ""])
-        .args(["--allowedTools", &format!("mcp__{MCP_NAME}")])
-        .args(["--disallowedTools"])
-        .args(["open_file", "save_file", "export"].map(|t| format!("mcp__{MCP_NAME}__{t}")))
-        .args(["--append-system-prompt", SYSTEM_PROMPT]);
+    c.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]).args([
+        "--mcp-config",
+        &mcp.to_string(),
+        "--strict-mcp-config",
+    ]);
+    match call.work_dir.and_then(file_rules) {
+        // With a folder the agent may read and write files in it, and only in it (the rules name the
+        // folder: anything else is refused, as `claude -p` can't ask), and the MCP server may open,
+        // save and export inside it. Still no shell or web.
+        Some(rules) => {
+            c.args(["--tools", "Read,Write,Edit,Glob,Grep"]).args(["--allowedTools", &format!("mcp__{MCP_NAME}")]).args(rules);
+        }
+        None => {
+            let mcp_files = if call.work_dir.is_some() {
+                Vec::new()
+            } else {
+                ["open_file", "save_file", "export"].map(|t| format!("mcp__{MCP_NAME}__{t}")).to_vec()
+            };
+            c.args(["--tools", ""]).args(["--allowedTools", &format!("mcp__{MCP_NAME}")]);
+            if !mcp_files.is_empty() {
+                c.args(["--disallowedTools"]).args(mcp_files);
+            }
+        }
+    }
+    c.args(["--append-system-prompt", &format!("{SYSTEM_PROMPT}{}", folder_note(call))]);
     if let Some(id) = call.session {
         c.args(["--resume", id]);
     }
@@ -202,7 +250,7 @@ fn claude_command(program: &Path, call: &Call) -> Command {
     }
     // After `--`, so a prompt that starts with a dash is still a prompt.
     c.args(["--", call.prompt]);
-    c.current_dir(work_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    c.current_dir(start_dir(call)).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     c
 }
 
@@ -226,19 +274,32 @@ fn codex_command(program: &Path, call: &Call, user_model: Option<&str>) -> Comma
         c.args(["resume", id]);
     }
     c.args(["--json", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules"]);
-    c.args(["-c", "sandbox_mode=\"read-only\""]);
+    // With a work folder Codex may write in it (and only in it); without one it only reads.
+    let sandbox = if call.work_dir.is_some() { "workspace-write" } else { "read-only" };
+    c.args(["-c", &format!("sandbox_mode=\"{sandbox}\"")]);
+    if call.work_dir.is_some() {
+        // Its writable places are the folder alone: not the system's or the user's temporary folders.
+        c.args(["-c", "sandbox_workspace_write.exclude_slash_tmp=true", "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true"]);
+    }
     if let Some(model) = user_model {
         c.args(["-m", model]);
     }
     let q = |v: Value| v.to_string();
     c.args(["-c", &format!("mcp_servers.{MCP_NAME}.command={}", q(json!(call.cli)))]);
     c.args(["-c", &format!("mcp_servers.{MCP_NAME}.args={}", q(json!(["mcp", "--attach", call.port.to_string()])))]);
-    c.args(["-c", &format!("mcp_servers.{MCP_NAME}.disabled_tools={}", q(json!(["open_file", "save_file", "export"])))]);
+    match call.work_dir {
+        Some(dir) => {
+            c.args(["-c", &format!("mcp_servers.{MCP_NAME}.env={{ FIGDESK_WORK_DIR = {} }}", q(json!(dir)))]);
+        }
+        None => {
+            c.args(["-c", &format!("mcp_servers.{MCP_NAME}.disabled_tools={}", q(json!(["open_file", "save_file", "export"])))]);
+        }
+    }
     if call.has_key {
         c.args(["-c", &format!("mcp_servers.{MCP_NAME}.env_vars={}", q(json!(["OPENAI_API_KEY"])))]);
     }
-    c.args(["--", &format!("{SYSTEM_PROMPT}\n\n{}", call.prompt)]);
-    c.current_dir(work_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    c.args(["--", &format!("{SYSTEM_PROMPT}{}\n\n{}", folder_note(call), call.prompt)]);
+    c.current_dir(start_dir(call)).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     c
 }
 
@@ -287,7 +348,15 @@ impl Agent {
     }
 
     /// Start a turn: `prompt` to `provider`'s agent, attached to the control channel on `port`.
-    pub fn send(&self, provider: Provider, prompt: &str, session: Option<&str>, port: u16, model: Option<&str>) -> Result<(), String> {
+    pub fn send(
+        &self,
+        provider: Provider,
+        prompt: &str,
+        session: Option<&str>,
+        port: u16,
+        model: Option<&str>,
+        work_dir: Option<&Path>,
+    ) -> Result<(), String> {
         if lock(&self.child).is_some() {
             return Err("the agent is still answering".into());
         }
@@ -303,7 +372,10 @@ impl Agent {
         let dirs = search_dirs(None, shell_path.as_deref(), std::env::var_os("PATH").as_deref(), home.as_deref());
         let program = find_in(&dirs, name).ok_or(install)?;
         let cli = cli_beside_exe().ok_or("figcraft-cli was not found next to the app: the agent has no way to reach the design.")?;
-        let call = Call { cli: &cli, port, prompt, session, model, has_key: key.is_some() };
+        if let Some(dir) = work_dir.filter(|d| !d.is_dir()) {
+            return Err(format!("The work folder {} doesn't exist. Choose another in Setup, or clear it.", dir.display()));
+        }
+        let call = Call { cli: &cli, port, prompt, session, model, has_key: key.is_some(), work_dir };
         let mut cmd = match provider {
             Provider::Claude => claude_command(&program, &call),
             Provider::Codex => codex_command(&program, &call, codex_model().as_deref()),
@@ -429,7 +501,7 @@ mod tests {
     }
 
     fn call<'a>(session: Option<&'a str>, model: Option<&'a str>, has_key: bool) -> Call<'a> {
-        Call { cli: Path::new("/app/figcraft-cli"), port: 7979, prompt: "draw", session, model, has_key }
+        Call { cli: Path::new("/app/figcraft-cli"), port: 7979, prompt: "draw", session, model, has_key, work_dir: None }
     }
 
     fn args_of(c: &Command) -> Vec<String> {
@@ -476,6 +548,32 @@ mod tests {
         assert!(args.last().is_some_and(|p| p.ends_with("draw")));
         let resumed = args_of(&codex_command(Path::new("/bin/codex"), &call(Some("thread-1"), None, false), None));
         assert_eq!(&resumed[..3], ["exec", "resume", "thread-1"]);
+    }
+
+    #[test]
+    fn a_work_folder_moves_the_agent_into_it_and_opens_files_inside_it() {
+        let dir = Path::new("/Users/me/Work");
+        let with = Call { work_dir: Some(dir), ..call(None, None, true) };
+        let claude = claude_command(Path::new("/bin/claude"), &with);
+        assert_eq!(claude.get_current_dir(), Some(dir));
+        let args = args_of(&claude);
+        let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+        assert_eq!(after("--tools").as_deref(), Some("Read,Write,Edit,Glob,Grep"));
+        assert!(!args.iter().any(|a| a == "--disallowedTools"), "files are allowed in the folder");
+        assert!(args.contains(&"Read(//Users/me/Work/**)".to_string()) && args.contains(&"Edit(//Users/me/Work/**)".to_string()), "{args:?}");
+        assert!(!args.iter().any(|a| a == "Write" || a == "Read"), "no tool is allowed without its folder rule");
+        let mcp: Value = serde_json::from_str(&after("--mcp-config").unwrap_or_default()).unwrap_or_default();
+        assert_eq!(mcp["mcpServers"]["figcraft"]["env"]["FIGDESK_WORK_DIR"], "/Users/me/Work");
+        assert_eq!(mcp["mcpServers"]["figcraft"]["env"]["OPENAI_API_KEY"], "${OPENAI_API_KEY}", "the key and the folder share the entry");
+        assert!(after("--append-system-prompt").is_some_and(|p| p.contains("/Users/me/Work")));
+        let codex = codex_command(Path::new("/bin/codex"), &with, None);
+        assert_eq!(codex.get_current_dir(), Some(dir));
+        let cargs = args_of(&codex).join(" ");
+        assert!(cargs.contains("exclude_slash_tmp=true") && cargs.contains("exclude_tmpdir_env_var=true"));
+        assert!(cargs.contains("sandbox_mode=\"workspace-write\"") && cargs.contains("env={ FIGDESK_WORK_DIR = \"/Users/me/Work\" }"), "{cargs}");
+        assert!(!cargs.contains("disabled_tools"));
+        let none = args_of(&codex_command(Path::new("/bin/codex"), &call(None, None, false), None)).join(" ");
+        assert!(none.contains("sandbox_mode=\"read-only\"") && none.contains("disabled_tools"));
     }
 
     #[test]

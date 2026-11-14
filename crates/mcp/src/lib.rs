@@ -20,6 +20,7 @@ mod prompts;
 mod resources;
 mod server;
 mod tools;
+mod workdir;
 
 #[cfg(test)]
 mod gradient_tests;

@@ -73,15 +73,21 @@ fn quoted(s: &str) -> String {
 }
 
 /// The configuration that connects `client` to the app listening on `port`, with the CLI at `cli`.
-pub fn snippet(client: Client, cli: &str, port: u16) -> String {
+/// With a work folder, the server is told it, so it keeps every file path inside it.
+pub fn snippet(client: Client, cli: &str, port: u16, work_dir: Option<&str>) -> String {
     match client {
-        Client::ClaudeCode => format!("claude mcp add figcraft -- {} mcp --attach {port}", shell_word(cli)),
+        Client::ClaudeCode => {
+            let env = work_dir.map(|d| format!("-e {} ", shell_word(&format!("FIGDESK_WORK_DIR={d}")))).unwrap_or_default();
+            format!("claude mcp add figcraft {env}-- {} mcp --attach {port}", shell_word(cli))
+        }
         Client::Codex => {
-            format!("[mcp_servers.figcraft]\ncommand = {}\nargs = [\"mcp\", \"--attach\", \"{port}\"]", quoted(cli))
+            let env = work_dir.map(|d| format!("\nenv = {{ FIGDESK_WORK_DIR = {} }}", quoted(d))).unwrap_or_default();
+            format!("[mcp_servers.figcraft]\ncommand = {}\nargs = [\"mcp\", \"--attach\", \"{port}\"]{env}", quoted(cli))
         }
         Client::Other => {
+            let env = work_dir.map(|d| format!(",\n      \"env\": {{ \"FIGDESK_WORK_DIR\": {} }}", quoted(d))).unwrap_or_default();
             format!(
-                "{{\n  \"mcpServers\": {{\n    \"figcraft\": {{\n      \"command\": {},\n      \"args\": [\"mcp\", \"--attach\", \"{port}\"]\n    }}\n  }}\n}}",
+                "{{\n  \"mcpServers\": {{\n    \"figcraft\": {{\n      \"command\": {},\n      \"args\": [\"mcp\", \"--attach\", \"{port}\"]{env}\n    }}\n  }}\n}}",
                 quoted(cli)
             )
         }
@@ -161,7 +167,8 @@ fn connect(app: &mut FigApp, ui: &mut Ui, w: f32) {
     wrapped(ui, tr(where_to(client)), w, regular(11.0), t.text_secondary);
     ui.add_space(6.0);
     let port = app.ui.control_port.unwrap_or(DEFAULT_PORT);
-    let text = snippet(client, &cli_path(), port);
+    let work = app.session.prefs.ai_work_dir.clone();
+    let text = snippet(client, &cli_path(), port, work.as_deref());
     code_box(ui, &text, w);
     ui.add_space(8.0);
     let now = ui.input(|i| i.time);
@@ -174,6 +181,8 @@ fn connect(app: &mut FigApp, ui: &mut Ui, w: f32) {
         crate::egui_copy_text(ui.ctx(), &text);
         app.ui.ai.copied_at = Some(now);
     }
+    ui.add_space(16.0);
+    work_folder(app, ui, w);
     ui.add_space(14.0);
     wrapped(
         ui,
@@ -182,6 +191,44 @@ fn connect(app: &mut FigApp, ui: &mut Ui, w: f32) {
         regular(11.0),
         t.text_secondary,
     );
+}
+
+/// The work folder: where the AI works and keeps what it makes. Chosen with the system's folder
+/// dialog, and kept in the preferences.
+fn work_folder(app: &mut FigApp, ui: &mut Ui, w: f32) {
+    let t = Tokens::get(ui.ctx());
+    wrapped(ui, tr("Work folder"), w, semibold(13.0), t.text);
+    ui.add_space(6.0);
+    let current = app.session.prefs.ai_work_dir.clone();
+    let line = match &current {
+        Some(dir) => crate::widgets::elide_start_font(ui, dir, w - 16.0, regular(11.0)),
+        None => tr("Not set").to_string(),
+    };
+    let color = if current.is_some() { t.text } else { t.text_tertiary };
+    let galley = ui.painter().layout_no_wrap(line, regular(11.0), color);
+    let (r, _) = ui.allocate_exact_size(vec2(w, galley.size().y + 16.0), Sense::hover());
+    ui.painter().rect(r, CornerRadius::same(6), t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    ui.painter().galley(pos2(r.min.x + 8.0, r.min.y + 8.0), galley, color);
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if text_button(ui, tr("Choose folder…"), 130.0_f32.min(w)) {
+            app.pick_folder(tr("Work folder"), |app, dir| {
+                app.session.prefs.ai_work_dir = Some(dir.to_string_lossy().into_owned());
+                app.services.save_prefs(&app.session.prefs);
+            });
+        }
+        if current.is_some() && text_button(ui, tr("Clear"), 70.0) {
+            app.session.prefs.ai_work_dir = None;
+            app.services.save_prefs(&app.session.prefs);
+        }
+    });
+    ui.add_space(6.0);
+    let note = if current.is_some() {
+        tr_noop("The AI works in this folder. What it makes (pictures, exports, saved files) stays in it, and it can't use files outside it.")
+    } else {
+        tr_noop("Choose a folder for the AI to work in. Without one it works in a temporary folder and can't open, save or export files.")
+    };
+    wrapped(ui, tr(note), w, regular(11.0), t.text_secondary);
 }
 
 /// Text wrapped to `w`, as one block.
@@ -224,25 +271,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_work_folder_is_handed_to_the_server_in_every_snippet() {
+        let dir = "/Users/me/My Work";
+        let claude = snippet(Client::ClaudeCode, "figcraft-cli", 7979, Some(dir));
+        assert_eq!(claude, "claude mcp add figcraft -e 'FIGDESK_WORK_DIR=/Users/me/My Work' -- figcraft-cli mcp --attach 7979");
+        let codex = snippet(Client::Codex, "figcraft-cli", 7979, Some(dir));
+        assert!(codex.ends_with("env = { FIGDESK_WORK_DIR = \"/Users/me/My Work\" }"), "{codex}");
+        let other: serde_json::Value = serde_json::from_str(&snippet(Client::Other, "figcraft-cli", 7979, Some(dir))).expect("valid JSON");
+        assert_eq!(other["mcpServers"]["figcraft"]["env"]["FIGDESK_WORK_DIR"], dir);
+    }
+
+    #[test]
     fn claude_code_command_names_the_cli_and_port() {
-        assert_eq!(snippet(Client::ClaudeCode, "figcraft-cli", 7979), "claude mcp add figcraft -- figcraft-cli mcp --attach 7979");
+        assert_eq!(snippet(Client::ClaudeCode, "figcraft-cli", 7979, None), "claude mcp add figcraft -- figcraft-cli mcp --attach 7979");
     }
 
     #[test]
     fn paths_with_spaces_or_quotes_stay_one_shell_word() {
-        let s = snippet(Client::ClaudeCode, "/Apps/Fig Craft/it's/figcraft-cli", 1);
+        let s = snippet(Client::ClaudeCode, "/Apps/Fig Craft/it's/figcraft-cli", 1, None);
         assert!(s.contains("'/Apps/Fig Craft/it'\\''s/figcraft-cli'"), "{s}");
     }
 
     #[test]
     fn codex_snippet_is_a_toml_table_with_the_attach_args() {
-        let s = snippet(Client::Codex, "/x/figcraft-cli", 4242);
+        let s = snippet(Client::Codex, "/x/figcraft-cli", 4242, None);
         assert_eq!(s, "[mcp_servers.figcraft]\ncommand = \"/x/figcraft-cli\"\nargs = [\"mcp\", \"--attach\", \"4242\"]");
     }
 
     #[test]
     fn generic_snippet_is_valid_json_with_the_server_entry() {
-        let s = snippet(Client::Other, "C:\\Program Files\\figcraft-cli.exe", 7979);
+        let s = snippet(Client::Other, "C:\\Program Files\\figcraft-cli.exe", 7979, None);
         let v: serde_json::Value = serde_json::from_str(&s).expect("valid JSON");
         let server = &v["mcpServers"]["figcraft"];
         assert_eq!(server["command"], "C:\\Program Files\\figcraft-cli.exe");

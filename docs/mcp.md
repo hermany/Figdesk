@@ -2296,3 +2296,22 @@ places it with `image.place`. It needs `OPENAI_API_KEY` in the environment (a Ch
 include an API key, and each picture is billed to the key). The chat looks for the key in the app's
 environment, then in the user's login shell, and passes it to the agent's MCP server without writing it on
 a command line or to disk. The request goes through the system's `curl`, with its options on standard input.
+
+#### The work folder
+
+**Setup ▸ Work folder** (kept in the preferences as `ai_work_dir`) is where the AI works and what it makes
+stays. Without one the agent works in a temporary folder and may not open, save or export files. With one:
+
+- the agent starts in it, and is told so;
+- Claude may read and write files only inside it (permission rules that name the folder; `claude -p`
+  can't ask, so everything else is refused), and Codex runs with a sandbox whose only writable place is it;
+- the MCP server it runs gets `FIGDESK_WORK_DIR` and makes every file path a call carries (`path` of
+  `open_file`, `save_file` and `export`, and any value under a key that names a path, a file or a folder in
+  `run_command`, `batch` and the other command tools) absolute inside the folder: a relative path starts
+  from it, and `..`, `~`, a link that leads out and any other path are refused;
+- `generate_image` also keeps each picture in the folder's `images` folder (`savedTo` in its result);
+- the snippets under **Connect your AI** hand the same variable to Claude Code, Codex or another client.
+
+The check on the MCP side looks at the arguments the agent sends; it is not a sandbox. The app does not
+confine the commands it runs for an attached client (the engine's roots confine the whole app, including the
+person's own menus), so a command that takes a path under a key with another name is not caught.
