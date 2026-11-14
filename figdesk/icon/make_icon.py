@@ -8,12 +8,12 @@ import math, os, random, struct, subprocess, sys, tempfile
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SRC = os.path.join(ROOT, "assets/app-icon/figcraft-small.svg")
 SRC_BACKUP = os.path.join(ROOT, "figdesk/icon/chameleon-source.svg")
-N = 30                      # dots per side
+N = 40                      # dots per side
 S = 10                      # samples per cell side
-BG = "#0acf83"     # Figma green
+BG = "#12d6c2"     # Figma green, pushed toward cyan
 INK = "#1e1e1e"
 rng = random.Random(7)      # fixed seed: the scatter is random-looking but the icon is reproducible
-PALETTE = ["#f24e1e", "#ff7262", "#a259ff", "#1abcfe", "#0b5d45"]  # red, orange, purple, blue, deep green (Figma green is the background)
+PALETTE = ["#f24e1e", "#ff7262", "#a259ff", "#3d5afe", "#14308f"]  # red, orange, purple, indigo, deep blue (light cyan/green would vanish on the background)
 
 if not os.path.exists(SRC_BACKUP):               # keep the original drawing so the script can re-run
     open(SRC_BACKUP, "wb").write(open(SRC, "rb").read())
@@ -55,16 +55,16 @@ for gy in range(N):
                     fig += 1
                     ink += is_ink(c)
         cov = fig / (S * S)
-        if cov < 0.3: continue
+        if cov < 0.12: continue
         cells.add((gx, gy))
         light = (fig - ink) / (S * S)            # paper area -> big dots, engraved lines -> small
-        r = cell * (0.15 + 0.52 * (ink / max(fig, 1)) ** 0.6) * rng.uniform(0.8, 1.2)   # darker engraving -> bigger dot
-        cx = (gx + .5 + rng.uniform(-0.16, 0.16)) * cell                    # scattered off the grid
-        cy = (gy + .5 + rng.uniform(-0.16, 0.16)) * cell
-        u = (gx + gy) / (2 * (N - 1)) + rng.uniform(-0.08, 0.08)
+        r = cell * min(0.58, (0.36 + 0.24 * (ink / max(fig, 1)) ** 0.6) * rng.uniform(0.85, 1.15))   # darker engraving -> bigger dot
+        cx = (gx + .5 + rng.uniform(-0.1, 0.1)) * cell                    # scattered off the grid
+        cy = (gy + .5 + rng.uniform(-0.1, 0.1)) * cell
+        u = (gx + gy) / (2 * (N - 1)) + rng.uniform(-0.14, 0.14)
         dots.append((cx, cy, r, colour(u), (gx, gy)))
 
-def darken(c, k=0.62):
+def darken(c, k=0.8):
     return "#%02x%02x%02x" % tuple(round(v * k) for v in hexrgb(c))
 def edge(g):      # touches an empty cell: the outline of the drawing
     return any((g[0] + dx, g[1] + dy) not in cells for dx in (-1, 0, 1) for dy in (-1, 0, 1))
