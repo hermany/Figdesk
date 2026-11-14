@@ -1,4 +1,11 @@
-# FigCraft app icon
+# Figdesk app icon (dotted chameleon)
+
+**Figdesk change:** the icon is the FigCraft chameleon silhouette rebuilt as a halftone of dots (about 750
+circles) on a dark tile, coloured with a five-hue diagonal gradient (`#f24e1e #ff7262 #a259ff #1abcfe #0acf83`).
+It is generated from the owner's original drawing by `figdesk/icon/make_icon.py` (source kept in
+`figdesk/icon/chameleon-source.svg`) and rendered by `figdesk/icon/render.sh`. No third-party logo shapes are used,
+only plain colours. The text below describes the upstream FigCraft icon.
+
 
 A **chameleon**: an engraving portrait in profile with a curled tail, in the Crafting Apps'
 owl-template framing (full-bleed field, head and body filling the tile, body running off the edges).
