@@ -16,6 +16,7 @@ pub mod props;
 pub mod proto;
 pub mod proto_actions;
 pub mod section;
+pub mod smart;
 pub mod structure;
 pub mod styles;
 pub mod text;
@@ -120,6 +121,7 @@ fn registry() -> &'static Registry {
         list.extend(crate::textfit::specs());
         list.extend(crate::board::specs());
         list.extend(facilitate::specs());
+        list.extend(smart::specs());
         list.extend(crate::board_grid::specs());
         list.extend(crate::board_table::specs());
         list.extend(crate::board_templates::specs());

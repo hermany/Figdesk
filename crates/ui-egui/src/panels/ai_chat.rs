@@ -19,6 +19,8 @@ const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Longest prompt sent, in bytes, and the most the selection adds to it.
 const MAX_PROMPT_BYTES: usize = 16 * 1024;
 const MAX_CONTEXT_BYTES: usize = 8 * 1024;
+/// Longest prompt a smart section's run sends: its mode's document is in it.
+const MAX_SMART_PROMPT: usize = 96 * 1024;
 /// Most selected layers named to the agent or shown as chips, and the longest name kept.
 const MAX_SELECTED: usize = 20;
 const MAX_NAME_CHARS: usize = 80;
@@ -202,6 +204,19 @@ impl ChatState {
         self.session.as_ref().filter(|(p, _)| *p == provider).map(|(_, id)| id.as_str())
     }
 
+    /// A prompt the app composed (a smart section's run): the conversation shows `shown`, the agent
+    /// gets `prompt`.
+    pub fn send_prompt(&mut self, shown: &str, mut prompt: String) {
+        if self.running {
+            return;
+        }
+        self.push(Role::User, shown.to_string());
+        cut(&mut prompt, MAX_SMART_PROMPT);
+        self.last_provider = Some(self.model.provider());
+        self.request = Some(Request { prompt, provider: self.model.provider(), model: self.model.flag() });
+        self.running = true;
+    }
+
     /// Text the agent is writing: it continues its last message, or starts a new one after a tool.
     pub fn append_assistant(&mut self, delta: &str) {
         match self.messages.last_mut() {
@@ -322,6 +337,8 @@ fn empty(app: &mut FigApp, ui: &mut Ui, w: f32) {
         }
         ui.add_space(6.0);
     }
+    ui.add_space(10.0);
+    crate::ai::smart_section_button(app, ui, w);
 }
 
 /// `text` laid out in `font`, with what sits between `**` pairs in bold (the agent writes Markdown).

@@ -183,10 +183,32 @@ fn connect(app: &mut FigApp, ui: &mut Ui, w: f32) {
     }
     ui.add_space(16.0);
     work_folder(app, ui, w);
+    ui.add_space(16.0);
+    wrapped(ui, tr("Smart sections"), w, semibold(13.0), Tokens::get(ui.ctx()).text);
+    ui.add_space(6.0);
+    smart_section_button(app, ui, w);
     ui.add_space(14.0);
     wrapped(
         ui,
         tr("The agent reaches this app only through 127.0.0.1. Edits show live, and undo works as usual."),
+        w,
+        regular(11.0),
+        t.text_secondary,
+    );
+}
+
+/// A button that adds a smart section (or makes the selected sections smart), with what it is for.
+pub(crate) fn smart_section_button(app: &mut FigApp, ui: &mut Ui, w: f32) {
+    let t = Tokens::get(ui.ctx());
+    if text_button(ui, tr("New smart section"), w.min(170.0)) {
+        app.run("smartSection.create", serde_json::json!({}));
+    }
+    ui.add_space(4.0);
+    wrapped(
+        ui,
+        tr(
+            "A smart section runs a mode on what is inside it. Play sends it to the AI with the mode's document from the work folder's prompts folder.",
+        ),
         w,
         regular(11.0),
         t.text_secondary,

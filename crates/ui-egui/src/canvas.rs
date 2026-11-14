@@ -358,6 +358,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     crate::dev_mode::refresh_measurements(app);
     app.session.tool.labels = overlays(app, &painter, &t);
     crate::frame_labels::rename_field(app, ui);
+    crate::frame_labels::smart_controls_input(app, ui);
     // The zoom tool's area.
     if let (Some(start), Some(p)) = (app.canvas.zoom_drag, ctx.input(|i| i.pointer.hover_pos())) {
         let area = Rect::from_two_pos(start, p);

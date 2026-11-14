@@ -73,3 +73,4 @@ When you add one of these, add its row here in the same commit; when you remove 
 | Icon generator | `figdesk/icon/` | Dotted-chameleon app icon |
 | Upstream compare | `figdesk/scripts/upstream-compare.sh` | New upstream commits, changed areas, likely conflicts |
 | AI tab | `crates/ui-egui/src/panels/ai.rs`, `ai_chat.rs`, `apps/figcraft/src/agent.rs` | Connection setup and chat with a local `claude` agent over the app's MCP server |
+| Smart sections | `crates/engine/src/cmd/smart.rs`, `crates/ui-egui/src/canvas/frame_labels.rs`, `apps/figcraft/src/smart.rs`, `apps/figcraft/src/smart_modes/` | A section with a mode and a Play button that runs the AI on it, with prompt documents kept in the work folder |

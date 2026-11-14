@@ -29,6 +29,7 @@ mod gamepad;
 mod graphics;
 mod recovery;
 mod services;
+mod smart;
 mod startup;
 mod window_frame;
 
@@ -63,6 +64,8 @@ struct App {
     control: Option<control_server::Handle>,
     /// The AI agent the AI tab's chat talks to.
     agent: agent::Agent,
+    /// The work folder the smart sections' mode list was last read from.
+    smart_dir: Option<String>,
     ctx_slot: Arc<Mutex<Option<egui::Context>>>,
     /// The window title last sent: a viewport command asks for another frame, so it's only sent
     /// when the title changes (sending it every frame kept an idle window redrawing).
@@ -89,6 +92,51 @@ impl App {
         fig.ui.control_error = None;
         self.control = Some(server);
         Ok(port)
+    }
+
+    /// Smart sections: keep the mode list to the project's prompt documents, and run a section whose
+    /// Play was pressed by handing it, with its mode's document, to the AI agent.
+    fn drive_smart(&mut self, fig: &mut FigApp) {
+        use figcraft_engine::cmd::smart::mode_of;
+        use std::path::Path;
+        let dir = fig.session.prefs.ai_work_dir.clone().filter(|d| Path::new(d).is_dir());
+        if dir != self.smart_dir || std::mem::take(&mut fig.ui.smart_refresh) {
+            self.smart_dir = dir.clone();
+            fig.ui.smart_modes = match dir.as_deref().map(Path::new) {
+                Some(work) => {
+                    if let Err(e) = smart::ensure_prompts(work) {
+                        log::warn!("smart sections: could not copy the prompt documents into {}: {e}", work.display());
+                    }
+                    smart::modes(work).into_iter().map(|m| (m.id, m.title)).collect()
+                }
+                None => smart::default_modes().into_iter().map(|m| (m.id, m.title)).collect(),
+            };
+        }
+        let Some(id) = fig.ui.smart_run.take() else { return };
+        let section = fig.session.doc().ok().and_then(|d| d.node(figcraft_engine::doc::NodeId(id))).map(|n| (n.name.clone(), mode_of(n)));
+        let Some((name, Some(mode))) = section else { return };
+        // The AI tab shows the run, whatever it ends up doing.
+        fig.ui.left_tab = figcraft_ui_egui::LeftTab::Ai;
+        fig.ui.open_left_panel();
+        fig.ui.chat.setup = false;
+        if fig.ui.chat.running {
+            fig.ui.chat.add_note("The AI is still answering: run the section again when it is done.");
+            return;
+        }
+        let Some(work) = dir.as_deref().map(Path::new) else {
+            fig.ui.chat.add_note("Choose a work folder first: a smart section builds what it makes there. The field is in the AI tab's Setup.");
+            return;
+        };
+        let prompt = smart::ensure_prompts(work)
+            .map_err(|e| format!("could not prepare {}: {e}", work.join(smart::FOLDER).display()))
+            .and_then(|()| smart::load(work, &mode));
+        match prompt {
+            Ok(doc) => {
+                let title = fig.ui.smart_modes.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, t)| t.clone());
+                fig.ui.chat.send_prompt(&format!("▶ {name} · {title}"), smart::build_prompt(&doc, &mode, id, &name, work));
+            }
+            Err(e) => fig.ui.chat.add_note(&e),
+        }
     }
 
     /// The chat's side of the AI tab: send a prompt to the agent (turning the control channel on when
@@ -166,6 +214,7 @@ impl eframe::App for App {
         }
         let title = with_app(|fig| {
             self.apply_control_action(fig, ctx);
+            self.drive_smart(fig);
             self.drive_agent(fig);
             control_server::drain_queue(&self.queue, &mut fig.control_queue);
             // Phase-safe background work: control queues, autosave/recovery deadlines, live polling.
@@ -395,6 +444,7 @@ fn main() -> eframe::Result {
             }
             Ok(Box::new(App {
                 agent: agent::Agent::new(ctx_slot.clone()),
+                smart_dir: None,
                 queue,
                 control,
                 ctx_slot,

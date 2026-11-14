@@ -5,7 +5,9 @@
 //! and drags its frame like pressing the frame itself.
 
 use egui::layers::ShapeIdx;
-use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Shape, Vec2, emath::Rot2, pos2, vec2};
+use std::cell::RefCell;
+
+use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2, emath::Rot2, pos2, vec2};
 use figcraft_doc::{Document, NodeId, NodeKind};
 use figcraft_geom::Point;
 
@@ -13,6 +15,83 @@ use crate::FigApp;
 use crate::canvas::status_badge;
 use crate::i18n::tr;
 use crate::theme::{ACCENT, COMPONENT, Tokens, regular, semibold};
+
+/// The mode chip and Play button of a smart section, as drawn this frame: (section id, Play, mode chip).
+type SmartHit = (u64, Rect, Rect);
+
+thread_local! {
+    /// What [`draw`] saw this frame; [`smart_controls`] takes it and makes the controls.
+    static SMART_HITS: RefCell<Vec<SmartHit>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A smart section's controls beside its name: the mode (a chip that opens the list of modes) and a
+/// Play button. Only an upright section has them. Returns where the next thing on the label goes.
+fn smart_controls(app: &FigApp, painter: &Painter, t: &Tokens, id: NodeId, mode: &str, pill: Rect) -> f32 {
+    let title = app.ui.smart_modes.iter().find(|(m, _)| m == mode).map_or_else(|| mode.to_string(), |(_, title)| title.clone());
+    let galley = painter.layout_no_wrap(title, semibold(11.0), t.text);
+    let chip = Rect::from_min_size(pos2(pill.max.x + 4.0, pill.min.y), vec2(galley.size().x + 26.0, pill.height()));
+    painter.rect_filled(chip, CornerRadius::same(4), t.hover);
+    painter.galley(chip.min + vec2(8.0, (chip.height() - galley.size().y) / 2.0), galley, t.text);
+    crate::icons::paint(
+        painter,
+        Rect::from_center_size(pos2(chip.max.x - 10.0, chip.center().y), vec2(10.0, 10.0)),
+        crate::icons::Icon::Chevron,
+        t.icon_secondary,
+    );
+    let play = Rect::from_min_size(pos2(chip.max.x + 4.0, pill.min.y), Vec2::splat(pill.height()));
+    let busy = app.ui.chat.running;
+    painter.rect_filled(play, CornerRadius::same(4), if busy { t.text_tertiary } else { ACCENT });
+    // The triangle, a little right of the middle so it looks centred.
+    let c = play.center() + vec2(1.0, 0.0);
+    let r = play.height() * 0.22;
+    painter.add(Shape::convex_polygon(
+        vec![c + vec2(-r * 0.8, -r * 1.1), c + vec2(-r * 0.8, r * 1.1), c + vec2(r * 1.2, 0.0)],
+        Color32::WHITE,
+        Stroke::NONE,
+    ));
+    SMART_HITS.with(|h| h.borrow_mut().push((id.0, play, chip)));
+    play.max.x + 4.0
+}
+
+/// The clickable parts of the smart sections drawn this frame, floating above the canvas so that a
+/// press on them is not a press on the canvas: Play hands the section to the AI agent, and the chip
+/// lists the modes.
+pub fn smart_controls_input(app: &mut FigApp, ui: &mut egui::Ui) {
+    let hits: Vec<SmartHit> = SMART_HITS.with(|h| std::mem::take(&mut *h.borrow_mut()));
+    let ctx = ui.ctx().clone();
+    for (id, play, chip) in hits {
+        let area =
+            |name: &str, rect: Rect| egui::Area::new(ui.scope_id().with((name, id))).fixed_pos(rect.min).order(egui::Order::Middle).constrain(false);
+        let busy = app.ui.chat.running;
+        area("smart_play", play).show(&ctx, |ui| {
+            let (rect, _) = ui.allocate_exact_size(play.size(), Sense::hover());
+            let resp = ui.interact(rect, ui.scope_id().with("press"), Sense::click());
+            crate::a11y::button(&resp, tr("Run smart section"));
+            let resp = crate::a11y::Tip::tip(resp, tr("Run smart section"));
+            if resp.clicked() && !busy {
+                app.ui.smart_run = Some(id);
+            }
+        });
+        area("smart_mode", chip).show(&ctx, |ui| {
+            let (rect, _) = ui.allocate_exact_size(chip.size(), Sense::hover());
+            let resp = ui.interact(rect, ui.scope_id().with("press"), Sense::click());
+            crate::a11y::button(&resp, tr("Mode"));
+            if resp.clicked() {
+                // The app looks again at the project's prompt documents: a new one shows next frame.
+                app.ui.smart_refresh = true;
+            }
+            let modes = app.ui.smart_modes.clone();
+            crate::right::menu_popup(&resp).show(|ui| {
+                for (mode, title) in &modes {
+                    if crate::right::menu_item(ui, title, "") {
+                        app.run("smartSection.setMode", serde_json::json!({"ids": [id], "mode": mode}));
+                        ui.close();
+                    }
+                }
+            });
+        });
+    }
+}
 
 /// Where a label goes on screen: the corner it starts at, the angle it reads along (radians,
 /// clockwise on screen) and the length of the frame's edge along that direction.
@@ -129,7 +208,13 @@ pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: Nod
             crate::icons::paint(painter, ir, crate::icons::Icon::EyeOff, fg);
         }
         painter.galley(r.min + vec2(8.0 + eye, 4.0), galley, fg);
-        status_badge(painter, n, pos2(r.max.x + 6.0, r.center().y));
+        let mut after = r.max.x + 6.0;
+        if let Some(mode) = figcraft_engine::cmd::smart::mode_of(n)
+            && edge.angle.abs() < 1e-3
+        {
+            after = smart_controls(app, painter, t, id, &mode, r) + 2.0;
+        }
+        status_badge(painter, n, pos2(after, r.center().y));
         r
     } else {
         let mut x = tl.x;

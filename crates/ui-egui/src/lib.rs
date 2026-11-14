@@ -451,6 +451,13 @@ pub struct UiState {
     pub control_action: Option<ai::Action>,
     /// Why the last start failed, for the AI tab.
     pub control_error: Option<String>,
+    /// The modes a smart section offers, as (name, title): the app's own until a work folder adds the
+    /// project's prompt documents (the app keeps it up to date).
+    pub smart_modes: Vec<(String, String)>,
+    /// A smart section whose Play was pressed, for the app to run (it reads the mode's document).
+    pub smart_run: Option<u64>,
+    /// The mode list was opened: the app looks at the project's prompt documents again.
+    pub smart_refresh: bool,
     pub pages_open: bool,
     /// Pages panel search: open, and the case-insensitive name filter.
     pub page_search: bool,
@@ -681,6 +688,9 @@ impl Default for UiState {
             chat: ai_chat::ChatState::default(),
             control_action: None,
             control_error: None,
+            smart_modes: ["web", "document", "general"].map(|m| (m.to_string(), m[..1].to_uppercase() + &m[1..])).to_vec(),
+            smart_run: None,
+            smart_refresh: false,
             pages_open: true,
             page_search: false,
             page_filter: String::new(),
