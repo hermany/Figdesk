@@ -1156,7 +1156,11 @@ fn ui_set_view(app: &mut FigApp, ctx: &Context, p: &Value) -> Result<(), String>
         };
     }
     if let Some(t) = p.get("leftTab").and_then(Value::as_str) {
-        app.ui.left_tab = if t == "assets" { crate::LeftTab::Assets } else { crate::LeftTab::File };
+        app.ui.left_tab = match t {
+            "assets" => crate::LeftTab::Assets,
+            "ai" => crate::LeftTab::Ai,
+            _ => crate::LeftTab::File,
+        };
     }
     if let Some(t) = p.get("theme").and_then(Value::as_str) {
         app.session.prefs.theme = t.to_string();

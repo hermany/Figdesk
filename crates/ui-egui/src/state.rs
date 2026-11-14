@@ -9,6 +9,7 @@ pub enum RightTab {
 pub enum LeftTab {
     File,
     Assets,
+    Ai,
 }
 
 /// The window's title bar.

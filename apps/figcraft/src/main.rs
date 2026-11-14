@@ -253,6 +253,7 @@ fn main() -> eframe::Result {
         figcraft_ui_egui::live::open_invite(&mut fig, link);
     }
     let queue: Arc<Mutex<Vec<ControlRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    fig.ui.control_port = port;
     if let Some(p) = port {
         control_server::start(p, graphics::port_wait(), queue.clone(), ctx_slot.clone(), fig.session.events.clone());
     }

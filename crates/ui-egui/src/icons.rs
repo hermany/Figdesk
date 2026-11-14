@@ -131,6 +131,8 @@ icons! {
     Eyedropper,
     Code,
     Assets,
+    /// An AI client connection: a large and a small four-point sparkle.
+    Ai,
     /// Libraries: an open book.
     Library,
     Layers,

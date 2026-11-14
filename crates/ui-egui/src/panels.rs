@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod assets_panel;
 pub mod component_panel;
 pub mod dev_compare;

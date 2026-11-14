@@ -340,6 +340,7 @@ pub use dialogs::updates_ui;
 pub use dialogs::variables_panel;
 pub use home::home_recents;
 pub use home::online;
+pub use panels::ai;
 pub use panels::assets_panel;
 pub use panels::component_panel;
 pub use panels::dev_compare;
@@ -440,6 +441,9 @@ pub struct UiState {
     /// The tab of the previous frame, to see the right panel change mode.
     pub last_right_tab: RightTab,
     pub left_tab: LeftTab,
+    /// The port the control channel listens on (`--control`), if it does: the AI tab says so.
+    pub control_port: Option<u16>,
+    pub ai: ai::AiState,
     pub pages_open: bool,
     /// Pages panel search: open, and the case-insensitive name filter.
     pub page_search: bool,
@@ -665,6 +669,8 @@ impl Default for UiState {
             right_tab: RightTab::Design,
             last_right_tab: RightTab::Design,
             left_tab: LeftTab::File,
+            control_port: None,
+            ai: ai::AiState::default(),
             pages_open: true,
             page_search: false,
             page_filter: String::new(),

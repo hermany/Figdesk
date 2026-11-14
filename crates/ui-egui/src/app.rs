@@ -352,6 +352,7 @@ impl FigApp {
                         _ if self.ui.versions.open => i18n::tr("Version history"),
                         LeftTab::File => i18n::tr("Layers"),
                         LeftTab::Assets => i18n::tr("Assets"),
+                        LeftTab::Ai => i18n::tr("AI"),
                     };
                     a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Pane, label);
                     layers::left_panel(self, ui)
