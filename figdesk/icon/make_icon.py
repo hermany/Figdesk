@@ -8,11 +8,12 @@ import math, os, random, struct, subprocess, sys, tempfile
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SRC = os.path.join(ROOT, "assets/app-icon/figcraft-small.svg")
 SRC_BACKUP = os.path.join(ROOT, "figdesk/icon/chameleon-source.svg")
-N = 34                      # dots per side
-S = 4                       # samples per cell side
-BG = "#ffffff"
+N = 30                      # dots per side
+S = 10                      # samples per cell side
+BG = "#0acf83"     # Figma green
+INK = "#1e1e1e"
 rng = random.Random(7)      # fixed seed: the scatter is random-looking but the icon is reproducible
-PALETTE = ["#f24e1e", "#ff7262", "#a259ff", "#1abcfe", "#0acf83"]  # red, orange, purple, blue, green
+PALETTE = ["#f24e1e", "#ff7262", "#a259ff", "#1abcfe", "#0b5d45"]  # red, orange, purple, blue, deep green (Figma green is the background)
 
 if not os.path.exists(SRC_BACKUP):               # keep the original drawing so the script can re-run
     open(SRC_BACKUP, "wb").write(open(SRC, "rb").read())
@@ -27,6 +28,9 @@ bp = bpp // 8; row = (w * bp + 3) // 4 * 4; top_down = h < 0; h = abs(h)
 def px(x, y):
     o = off + (y if top_down else h - 1 - y) * row + x * bp
     return d[o + 2], d[o + 1], d[o]
+def in_tile(x, y):   # inside the source tile's rounded corners (its corners are not the drawing)
+    k = 0.22 * size; dx = max(k - x, x - (size - 1 - k), 0); dy = max(k - y, y - (size - 1 - k), 0)
+    return dx * dx + dy * dy <= k * k
 def is_field(c):   # the tile's green field
     return abs(c[0] - 2) + abs(c[1] - 218) + abs(c[2] - 150) < 90
 def is_ink(c): return sum(c) < 220
@@ -40,23 +44,36 @@ def colour(u):     # u in 0..1 along the diagonal, smooth blend through the pale
 
 cell = 512 / N
 dots = []
+cells = set()
 for gy in range(N):
     for gx in range(N):
         fig = ink = 0
         for sy in range(S):
             for sx in range(S):
                 c = px(gx * S + sx, gy * S + sy)
-                if not is_field(c):
+                if in_tile(gx * S + sx, gy * S + sy) and not is_field(c):
                     fig += 1
                     ink += is_ink(c)
         cov = fig / (S * S)
-        if cov < 0.2: continue
+        if cov < 0.3: continue
+        cells.add((gx, gy))
         light = (fig - ink) / (S * S)            # paper area -> big dots, engraved lines -> small
-        r = cell * (0.20 + 0.32 * light * cov) * rng.uniform(0.45, 1.6)   # varied sizes
-        cx = (gx + .5 + rng.uniform(-0.32, 0.32)) * cell                    # scattered off the grid
-        cy = (gy + .5 + rng.uniform(-0.32, 0.32)) * cell
+        r = cell * (0.15 + 0.52 * (ink / max(fig, 1)) ** 0.6) * rng.uniform(0.8, 1.2)   # darker engraving -> bigger dot
+        cx = (gx + .5 + rng.uniform(-0.16, 0.16)) * cell                    # scattered off the grid
+        cy = (gy + .5 + rng.uniform(-0.16, 0.16)) * cell
         u = (gx + gy) / (2 * (N - 1)) + rng.uniform(-0.08, 0.08)
-        dots.append((cx, cy, r, colour(u)))
+        dots.append((cx, cy, r, colour(u), (gx, gy)))
+
+def darken(c, k=0.62):
+    return "#%02x%02x%02x" % tuple(round(v * k) for v in hexrgb(c))
+def edge(g):      # touches an empty cell: the outline of the drawing
+    return any((g[0] + dx, g[1] + dy) not in cells for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+dots = [(x, y, r, darken(c) if edge(g) else c) for x, y, r, c, g in dots]
+
+EX, EY, ER = 237, 130, 40       # the eye of the drawing, in 512 space: cleared, then a ring of dark dots and a pupil
+dots = [d for d in dots if math.hypot(d[0] - EX, d[1] - EY) > ER + 14]
+dots += [(EX + ER * math.cos(a * math.pi / 8), EY + ER * math.sin(a * math.pi / 8), 7.5, "#1e1e1e") for a in range(16)]
+dots += [(EX + 20 * math.cos(a * math.pi / 3), EY + 20 * math.sin(a * math.pi / 3), 5, "#1e1e1e") for a in range(6)] + [(EX, EY, 7.5, "#1e1e1e")]
 
 def svg():
     out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><clipPath id="t"><rect width="512" height="512" rx="112"/></clipPath></defs>'
