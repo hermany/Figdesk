@@ -8,7 +8,7 @@ import os
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SRC = os.path.join(ROOT, "figdesk/icon/chameleon-source.svg")
-BG = "#1e1e1e"
+BG = "#000000"
 PALETTE = ["#f24e1e", "#ff7262", "#a259ff", "#1abcfe", "#0acf83"]  # red, orange, purple, blue, green
 
 # Original colours of the drawing.
