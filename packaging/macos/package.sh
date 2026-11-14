@@ -114,6 +114,10 @@ echo "==> assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/figcraft" "$APP/Contents/MacOS/Figdesk"
+# The AI tab's agent runs the CLI as its MCP server and looks for it beside the app's executable.
+if [[ "$HAS_CLI" = 1 ]]; then
+  cp "$WORK/bin/figcraft-cli" "$APP/Contents/MacOS/figcraft-cli"
+fi
 cp "$WORK/Figdesk.icns" "$APP/Contents/Resources/Figdesk.icns"
 cp "$ROOT/NOTICE" "$APP/Contents/Resources/"
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
@@ -129,6 +133,9 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
 # Today the only nested code is the main executable; frameworks/helpers would be signed here too.
+if [[ "$HAS_CLI" = 1 ]]; then
+  sign --options runtime --identifier ai.storyteller.figcraft-cli "$APP/Contents/MacOS/figcraft-cli"
+fi
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/Figdesk"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
