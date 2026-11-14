@@ -1,17 +1,10 @@
-<p align="center">
-  <a href="https://getartcraft.com/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/storytold/vectorcraft/main/docs/brand/artcraft-logo-white.png">
-      <img alt="ArtCraft" src="https://raw.githubusercontent.com/storytold/vectorcraft/main/docs/brand/artcraft-logo.png" width="200">
-    </picture>
-  </a>
-</p>
+
 
 <p align="center">
   <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.figcraft.png" width="128" height="128" alt="FigCraft icon: an engraved chameleon on a mint-green tile">
 </p>
 
-<h1 align="center">FigCraft</h1>
+<h1 align="center">FigDesk base of Figcraft</h1>
 
 <p align="center">
   <b>Interface design and prototyping: open source, collaborative and built in pure Rust.</b><br>
