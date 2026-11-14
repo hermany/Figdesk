@@ -2279,5 +2279,16 @@ continues across prompts (`--resume`). The layers selected on the page show as c
 sent with the prompt (ids and quoted names, marked as data), and the model is picked from a list (the
 default is the one the user's own setup uses). The agent gets only the MCP design tools: its own file,
 shell and web tools are off, and `open_file`, `save_file` and `export` are refused. `run_command` can
-still reach file commands, because an attached app does not confine them. Codex is not wired into the
-chat yet: connect it from the Setup view as before.
+still reach file commands, because an attached app does not confine them. The model list also has **Codex**: the chat then
+runs `codex exec` instead, alone (`--ignore-user-config`: the user's own Codex plugins and tools, Computer
+Use included, are not loaded, only their login) with a read-only sandbox, and this app's MCP server.
+A conversation belongs to the agent that started it: switching between Claude and Codex starts a new one.
+
+#### `generate_image`
+
+The MCP server has a `generate_image {prompt, size?, transparent?, name?, x?, y?, width?, height?, parent?}`
+tool: it makes a picture with OpenAI's image API (`gpt-image-1`; `FIGDESK_IMAGE_MODEL` changes the model) and
+places it with `image.place`. It needs `OPENAI_API_KEY` in the environment (a ChatGPT subscription does not
+include an API key, and each picture is billed to the key). The chat looks for the key in the app's
+environment, then in the user's login shell, and passes it to the agent's MCP server without writing it on
+a command line or to disk. The request goes through the system's `curl`, with its options on standard input.
