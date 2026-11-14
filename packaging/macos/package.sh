@@ -154,12 +154,24 @@ STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Figdesk.app"
 ln -s /Applications "$STAGE/Applications"
+# The volume shows the app's icon when mounted (its flag marks the folder as having a custom one).
+cp "$WORK/Figdesk.icns" "$STAGE/.VolumeIcon.icns"
+SetFile -c icnC "$STAGE/.VolumeIcon.icns"
+SetFile -a C "$STAGE"
 rm -f "$DMG" "$WORK/raw.dmg"
 # makehybrid + convert builds the image without attaching a device, unlike `create -srcfolder`,
 # which is flaky on CI runners ("Resource busy") and hangs in sandboxed sessions.
 hdiutil makehybrid -hfs -hfs-volume-name "Figdesk" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
 hdiutil convert "$WORK/raw.dmg" -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -f "$WORK/raw.dmg"
+# The .dmg file shows it too, in Finder (a custom file icon lives in the resource fork, outside the
+# signed data, and stays on this Mac: a download doesn't carry it).
+ICON_PNG="$WORK/dmg-icon.png"
+cp "$ICONS/figcraft-512.png" "$ICON_PNG"
+sips -i "$ICON_PNG" >/dev/null
+DeRez -only icns "$ICON_PNG" >"$WORK/dmg-icon.rsrc"
+Rez -append "$WORK/dmg-icon.rsrc" -o "$DMG"
+SetFile -a C "$DMG"
 sign "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
 if [[ "$NOTARIZE" = 1 ]]; then
