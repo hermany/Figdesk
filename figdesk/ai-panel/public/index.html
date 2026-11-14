@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FigCraft AI</title>
+<style>
+  :root { --bg:#141416; --panel:#1c1c1f; --line:#2a2a2e; --fg:#e8e8ea; --dim:#8b8b93; --acc:#7c6cff; --ok:#3ecf8e; --err:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; height:100vh; display:flex; flex-direction:column; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
+  header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--err); }
+  .dot.on { background:var(--ok); }
+  header .sp { flex:1; }
+  button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 10px; font:inherit; font-size:12px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  #log { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:100%; white-space:pre-wrap; word-wrap:break-word; }
+  .user { align-self:flex-end; background:var(--acc); color:#fff; padding:8px 12px; border-radius:12px 12px 2px 12px; max-width:85%; }
+  .ai { padding:2px 0; }
+  .think { color:var(--dim); font-size:12px; font-style:italic; border-left:2px solid var(--line); padding-left:8px; }
+  details.tool { font:12px ui-monospace, Menlo, monospace; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:4px 8px; }
+  details.tool summary { cursor:pointer; color:var(--dim); }
+  details.tool.ok summary::before { content:"✓ "; color:var(--ok); }
+  details.tool.bad summary::before { content:"✗ "; color:var(--err); }
+  details.tool pre { margin:6px 0 2px; white-space:pre-wrap; word-break:break-all; color:var(--dim); }
+  .err { color:var(--err); font-size:13px; }
+  #ctx { margin:0 14px; padding:6px 10px; border:1px dashed var(--line); border-radius:8px; font-size:12px; color:var(--dim); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .chip { background:var(--panel); border:1px solid var(--acc); color:var(--fg); border-radius:999px; padding:1px 8px; }
+  form { display:flex; gap:8px; padding:10px 14px 14px; }
+  textarea { flex:1; resize:none; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:10px; font:inherit; min-height:44px; max-height:160px; }
+  textarea:focus { outline:none; border-color:var(--acc); }
+  form button { background:var(--acc); border:none; color:#fff; padding:0 16px; border-radius:10px; font-size:14px; }
+  form button:disabled { opacity:.5; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span><h1>FigCraft AI</h1><span class="sp"></span>
+  <button id="undo" title="Deshacer el último cambio en FigCraft">↶ Deshacer</button>
+  <button id="reset" title="Empezar una conversación nueva">Nueva</button>
+</header>
+<div id="log"><div class="msg ai" style="color:var(--dim)">Selecciona algo en FigCraft y pídeme cambios: «haz este botón más redondeado», «crea una tarjeta de perfil al lado», «convierte esto en auto layout»…</div></div>
+<div id="ctx">Contexto: <span id="ctxv">—</span></div>
+<form id="f">
+  <textarea id="t" placeholder="Describe el cambio… (Enter para enviar, Shift+Enter nueva línea)" rows="1"></textarea>
+  <button id="send">Enviar</button>
+</form>
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+function add(cls, text, tag = "div") {
+  const el = document.createElement(tag);
+  el.className = cls; if (text != null) el.textContent = text;
+  log.appendChild(el); log.scrollTop = log.scrollHeight; return el;
+}
+
+// live selection context
+const es = new EventSource("/api/events");
+es.addEventListener("selection", (e) => {
+  const s = JSON.parse(e.data);
+  $("dot").classList.toggle("on", s.connected);
+  const v = $("ctxv"); v.innerHTML = "";
+  if (!s.connected) { v.textContent = "FigCraft desconectado — ábrelo con --control"; return; }
+  if (!s.nodes.length) { v.textContent = "nada seleccionado (la IA trabajará en la página)"; return; }
+  for (const n of s.nodes) {
+    const c = document.createElement("span"); c.className = "chip";
+    c.textContent = `${n.name} · ${n.type.toLowerCase()} ${Math.round(n.width)}×${Math.round(n.height)}`;
+    v.appendChild(c);
+  }
+  if (s.ids.length > s.nodes.length) v.append(` +${s.ids.length - s.nodes.length}`);
+});
+
+async function send(text) {
+  add("msg user", text);
+  $("send").disabled = true;
+  const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ text }) });
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+  const tools = [];
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const e = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+      if (e.type === "text") add("msg ai", e.text);
+      else if (e.type === "thinking") add("msg think", e.text);
+      else if (e.type === "tool") {
+        const d = add("tool", null, "details");
+        const label = e.name === "figcraft" ? e.input.command : e.name;
+        d.innerHTML = `<summary></summary><pre></pre>`;
+        d.querySelector("summary").textContent = label;
+        d.querySelector("pre").textContent = JSON.stringify(e.input.params ?? e.input, null, 1);
+        tools.push(d);
+      } else if (e.type === "tool_result") {
+        const d = tools.shift(); if (!d) continue;
+        d.classList.add(e.ok ? "ok" : "bad");
+        d.querySelector("pre").textContent += "\n→ " + e.output;
+      } else if (e.type === "error") add("msg err", e.text);
+    }
+  }
+  $("send").disabled = false; $("t").focus();
+}
+
+$("f").onsubmit = (ev) => { ev.preventDefault(); const t = $("t").value.trim(); if (!t) return; $("t").value = ""; send(t); };
+$("t").onkeydown = (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("f").requestSubmit(); } };
+$("reset").onclick = async () => { await fetch("/api/reset", { method: "POST" }); log.innerHTML = ""; add("msg ai", "Conversación nueva."); };
+$("undo").onclick = async () => { const r = await (await fetch("/api/undo", { method: "POST" })).json(); if (!r.ok) add("msg err", r.error); };
+</script>
+</body>
+</html>
