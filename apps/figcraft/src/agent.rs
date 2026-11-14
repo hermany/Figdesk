@@ -101,15 +101,53 @@ fn parse_codex_line(line: &str) -> Vec<Event> {
     }
 }
 
-/// `name` as an executable: on `PATH` or in the folders command-line tools usually install to (an
-/// app opened from the Finder has a short `PATH`).
-fn find_program(name: &str) -> Option<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+/// What the user's login shell says `name` is, asked as an interactive login shell (where `.zprofile`
+/// and `.zshrc` set up `PATH`, version managers and keys). An app opened from the Finder has none of
+/// that. Gives up after a few seconds.
+fn shell_env(name: &str) -> Option<String> {
+    let shell = std::env::var("SHELL").ok().filter(|s| Path::new(s).is_file())?;
+    let mut child = Command::new(shell)
+        .args(["-ilc", &format!("printenv {name}")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(40)),
+            _ => {
+                let _ = child.kill();
+                return None;
+            }
+        }
+    };
+    let mut out = String::new();
+    child.stdout.take()?.take(64 * 1024).read_to_string(&mut out).ok()?;
+    // Shell start-up files can print before the value: it is the last line.
+    let value = out.lines().rev().map(str::trim).find(|l| !l.is_empty())?.to_string();
+    status.success().then_some(value)
+}
+
+/// The folders the agent's own tools are looked for in, and the `PATH` it runs with: the program's own
+/// folder, the login shell's `PATH`, this process's, and the places command-line tools install to.
+fn search_dirs(program_dir: Option<&Path>, shell_path: Option<&str>, current: Option<&std::ffi::OsStr>, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = program_dir.map(Path::to_path_buf).into_iter().collect();
+    dirs.extend(shell_path.map(|p| std::env::split_paths(p).collect::<Vec<_>>()).unwrap_or_default());
+    dirs.extend(current.map(|p| std::env::split_paths(p).collect::<Vec<_>>()).unwrap_or_default());
+    if let Some(home) = home {
         dirs.extend([".local/bin", ".npm-global/bin", ".claude/local", ".bun/bin", ".volta/bin"].map(|d| home.join(d)));
     }
-    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from));
-    dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file())
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].map(PathBuf::from));
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()));
+    dirs
+}
+
+fn find_in(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    dirs.iter().map(|d| d.join(name)).find(|p| p.is_file())
 }
 
 /// The `figcraft-cli` that sits beside this executable, which the agent runs as its MCP server.
@@ -122,18 +160,6 @@ fn cli_beside_exe() -> Option<PathBuf> {
 const SYSTEM_PROMPT: &str = "You are working inside Figdesk, a design editor, through its MCP tools. \
 Make the changes the user asks for directly in the open document, in small steps, and look at the result with the screenshot tool. \
 Then say in a sentence or two what you did. Reply in the user's language. Work only with the design: do not look for files.";
-
-/// The key for OpenAI's image API, which the agent's MCP server reads from its environment: this
-/// process's, else the user's login shell's (an app opened from the Finder doesn't have the shell's).
-fn openai_key() -> Option<String> {
-    let found = std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.trim().is_empty());
-    found.or_else(|| {
-        let shell = std::env::var("SHELL").ok().filter(|s| Path::new(s).is_file())?;
-        let out = Command::new(shell).args(["-lc", "printenv OPENAI_API_KEY"]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-        let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        (out.status.success() && !key.is_empty()).then_some(key)
-    })
-}
 
 /// What the agent runs with: which provider, and what the call needs to continue a conversation or
 /// reach the image API.
@@ -237,16 +263,27 @@ pub struct Agent {
     child: Shared<Option<Child>>,
     events: Shared<Vec<Event>>,
     ctx: Shared<Option<egui::Context>>,
-    /// The OpenAI key, once looked for (the look can take a moment, so it runs in the background).
-    key: Shared<Option<String>>,
+    /// What the user's login shell knows, looked for once in the background (it can take a moment):
+    /// the OpenAI key for the image tool and the `PATH` the agent's tools are found by.
+    shell: Shared<ShellEnv>,
+}
+
+#[derive(Default)]
+struct ShellEnv {
+    key: Option<String>,
+    path: Option<String>,
 }
 
 impl Agent {
     pub fn new(ctx: Shared<Option<egui::Context>>) -> Self {
-        let key: Shared<Option<String>> = Arc::default();
-        let slot = key.clone();
-        let _ = std::thread::Builder::new().name("figcraft-agent-key".into()).spawn(move || *lock(&slot) = openai_key());
-        Self { child: Arc::default(), events: Arc::default(), ctx, key }
+        let shell: Shared<ShellEnv> = Arc::default();
+        let slot = shell.clone();
+        let _ = std::thread::Builder::new().name("figcraft-agent-env".into()).spawn(move || {
+            let key = std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.trim().is_empty()).or_else(|| shell_env("OPENAI_API_KEY"));
+            let path = shell_env("PATH");
+            *lock(&slot) = ShellEnv { key, path };
+        });
+        Self { child: Arc::default(), events: Arc::default(), ctx, shell }
     }
 
     /// Start a turn: `prompt` to `provider`'s agent, attached to the control channel on `port`.
@@ -258,9 +295,14 @@ impl Agent {
             Provider::Claude => ("claude", "Claude Code (the `claude` command) was not found. Install it and sign in, then try again."),
             Provider::Codex => ("codex", "Codex (the `codex` command) was not found. Install it and sign in, then try again."),
         };
-        let program = find_program(name).ok_or(install)?;
+        let (key, shell_path) = {
+            let env = lock(&self.shell);
+            (env.key.clone(), env.path.clone())
+        };
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let dirs = search_dirs(None, shell_path.as_deref(), std::env::var_os("PATH").as_deref(), home.as_deref());
+        let program = find_in(&dirs, name).ok_or(install)?;
         let cli = cli_beside_exe().ok_or("figcraft-cli was not found next to the app: the agent has no way to reach the design.")?;
-        let key = lock(&self.key).clone();
         let call = Call { cli: &cli, port, prompt, session, model, has_key: key.is_some() };
         let mut cmd = match provider {
             Provider::Claude => claude_command(&program, &call),
@@ -268,6 +310,11 @@ impl Agent {
         };
         if let Some(key) = &key {
             cmd.env("OPENAI_API_KEY", key);
+        }
+        // The agent's own start-up (its hooks, the tools they call) needs what a terminal would have.
+        let run_dirs = search_dirs(program.parent(), shell_path.as_deref(), std::env::var_os("PATH").as_deref(), home.as_deref());
+        if let Ok(path) = std::env::join_paths(&run_dirs) {
+            cmd.env("PATH", path);
         }
         let parse: fn(&str) -> Vec<Event> = match provider {
             Provider::Claude => parse_line,
@@ -448,6 +495,36 @@ mod tests {
         for junk in ["", "x", "{}", r#"{"type":"item.completed"}"#, r#"{"type":"item.started","item":5}"#] {
             assert!(parse_codex_line(junk).is_empty(), "{junk:?}");
         }
+    }
+
+    #[test]
+    fn the_agents_path_has_the_shells_folders_first_without_repeats() {
+        let dirs = search_dirs(
+            Some(Path::new("/opt/homebrew/bin")),
+            Some("/n/bin:/opt/homebrew/bin"),
+            Some(std::ffi::OsStr::new("/usr/bin:/n/bin")),
+            Some(Path::new("/h")),
+        );
+        assert_eq!(dirs[0], Path::new("/opt/homebrew/bin"));
+        assert_eq!(dirs[1], Path::new("/n/bin"));
+        assert!(dirs.contains(&PathBuf::from("/h/.npm-global/bin")));
+        let unique: std::collections::HashSet<_> = dirs.iter().collect();
+        assert_eq!(unique.len(), dirs.len(), "no folder twice: {dirs:?}");
+        assert!(
+            search_dirs(None, None, None, None).contains(&PathBuf::from("/usr/local/bin")),
+            "the usual places are searched even with nothing known"
+        );
+    }
+
+    #[test]
+    fn a_program_is_found_in_the_first_folder_that_has_it() {
+        let root = std::env::temp_dir().join(format!("figdesk-find-{}", std::process::id()));
+        let (a, b) = (root.join("a"), root.join("b"));
+        let _ = std::fs::create_dir_all(&a).and_then(|()| std::fs::create_dir_all(&b));
+        let _ = std::fs::write(b.join("tool"), "x");
+        assert_eq!(find_in(&[a.clone(), b.clone()], "tool"), Some(b.join("tool")));
+        assert_eq!(find_in(&[a], "tool"), None);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

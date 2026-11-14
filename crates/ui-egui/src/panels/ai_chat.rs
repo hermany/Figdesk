@@ -306,18 +306,29 @@ fn empty(app: &mut FigApp, ui: &mut Ui, w: f32) {
     }
 }
 
+/// `text` as a label the user can select and copy, wrapped to `w`.
+fn selectable(ui: &mut Ui, text: &str, font: egui::FontId, color: egui::Color32, w: f32) {
+    ui.scope(|ui| {
+        ui.set_max_width(w);
+        ui.add(egui::Label::new(egui::RichText::new(text).font(font).color(color)).selectable(true).wrap());
+    });
+}
+
 fn message(ui: &mut Ui, m: &Message, w: f32) {
     let t = Tokens::get(ui.ctx());
     match m.role {
         Role::User => {
-            let galley = ui.painter().layout(m.text.clone(), regular(12.0), t.text, w - 20.0);
-            let (r, _) = ui.allocate_exact_size(vec2(w, galley.size().y + 16.0), Sense::hover());
-            ui.painter().rect_filled(r, CornerRadius::same(8), t.selected_row);
-            ui.painter().galley(pos2(r.min.x + 10.0, r.min.y + 8.0), galley, t.text);
+            egui::Frame::new().fill(t.selected_row).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(10, 8)).show(
+                ui,
+                |ui| {
+                    ui.set_width(w - 20.0);
+                    selectable(ui, &m.text, regular(12.0), t.text, w - 20.0);
+                },
+            );
         }
-        Role::Assistant => wrapped(ui, &m.text, w, regular(12.0), t.text),
-        Role::Tool => wrapped(ui, &format!("• {}", m.text), w, regular(11.0), t.text_tertiary),
-        Role::Note => wrapped(ui, &m.text, w, regular(11.0), t.text_secondary),
+        Role::Assistant => selectable(ui, &m.text, regular(12.0), t.text, w),
+        Role::Tool => selectable(ui, &format!("• {}", m.text), regular(11.0), t.text_tertiary, w),
+        Role::Note => selectable(ui, &m.text, regular(11.0), t.text_secondary, w),
     }
     ui.add_space(8.0);
 }
@@ -409,7 +420,7 @@ fn composer(app: &mut FigApp, ui: &mut Ui, w: f32, pad: f32) {
     });
 }
 
-/// The selected layers as chips along `row`, each with a layer icon and a `#` before its name; the
+/// The selected layers as chips along `row`, each with the layer icon (a `#`) before its name; the
 /// ones that don't fit are counted.
 fn chips(ui: &mut Ui, sel: &[(u64, String)], row: egui::Rect) {
     let t = Tokens::get(ui.ctx());
@@ -422,7 +433,7 @@ fn chips(ui: &mut Ui, sel: &[(u64, String)], row: egui::Rect) {
             ui.painter().text(pos2(x, row.center().y), Align2::LEFT_CENTER, more, regular(11.0), t.text_secondary);
             return;
         }
-        let shown = crate::widgets::elide_font(ui, &format!("#{name}"), (room - 34.0).min(130.0), regular(12.0));
+        let shown = crate::widgets::elide_font(ui, name, (room - 34.0).min(130.0), regular(12.0));
         let galley = ui.painter().layout_no_wrap(shown, regular(12.0), t.text_secondary);
         let chip = egui::Rect::from_min_size(pos2(x, row.min.y), vec2(galley.size().x + 34.0, row.height()));
         ui.painter().rect(chip, CornerRadius::same(7), t.panel, Stroke::new(1.0, t.border), StrokeKind::Inside);
