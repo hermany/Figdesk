@@ -46,6 +46,7 @@ file only adds Figdesk-specific constraints; it never relaxes an upstream rule.
   `figdesk/ai-panel/`, but nothing from it may ship inside the native binary or the WASM build.
 - **Secrets**: `ANTHROPIC_API_KEY` is read from the environment only. Never write it to a file, a log or
   a screenshot. Do not commit `.env` files.
+- **Figdesk is independent of an installed FigCraft**: its own bundle id (`io.github.hermany.figdesk`), its own name in the Dock, menu and window title, and its own settings folder (`Figdesk` in the platform's config folder, with its recent files and recovery copies). `FIGCRAFT_CONFIG_DIR` still names a folder, as upstream's tests and docs use it. The document format and the `figcraft` crate and binary names are upstream's and stay.
 - **Upstream sync is its own task.** Do not mix a merge with feature work in one commit.
 
 ### How to run and verify
