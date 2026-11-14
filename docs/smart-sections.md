@@ -61,3 +61,9 @@ asking.
 
 Frames of the same size and structure inside a smart section are one screen in different states: the AI
 builds one screen and changes the elements that differ, not separate pages.
+
+Mode documents carry a `version` in their front matter. A document from an older app (no version, or a lower
+one) is kept as `<mode>.md.bak` and replaced by the current one, once; a document with the current
+version is never touched. While the base documents are not confirmed, Play sends only the questions (the
+mode document is not handed over), so nothing is built before the person has answered; the stack in
+`.agent/design.md` wins over the mode document's.

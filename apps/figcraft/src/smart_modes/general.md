@@ -1,4 +1,5 @@
 ---
+version: 2
 title: General
 output: out
 stack: whatever the request calls for

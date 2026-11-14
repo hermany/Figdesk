@@ -141,7 +141,7 @@ impl App {
         match prompt {
             Ok(doc) => {
                 let title = fig.ui.smart_modes.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, t)| t.clone());
-                fig.ui.chat.send_prompt(&format!("▶ {name} · {title}"), smart::build_prompt(&doc, &mode, id, &name, work));
+                fig.ui.chat.send_prompt(&format!("▶ {name} · {title}"), smart::build_prompt(&doc, &mode, id, &name, work, smart::confirmed(work)));
             }
             Err(e) => fig.ui.chat.add_note(&e),
         }
