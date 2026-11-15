@@ -1,5 +1,5 @@
 ---
-version: 3
+version: 4
 title: Web
 output: web
 stack: the one in .agent/design.md (standard: React, TypeScript, Vite, Tailwind CSS)
@@ -54,5 +54,7 @@ Where this document and `.agent/design.md` disagree (the stack above all), `.age
 
 ## When you finish
 
-Say in a few lines what you made and list the files you wrote with their paths. Do not paste the code
+Say in a few lines what you made and list the files you wrote with their paths. Give the commands to
+run it starting with `cd` to the full path of the output folder (the project is in that folder, not in the
+work folder), then `npm install` and `npm run dev` for the React stack. Do not paste the code
 into the chat. If something in the design could not be built as drawn, say what and why.

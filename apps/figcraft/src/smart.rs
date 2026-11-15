@@ -250,12 +250,12 @@ mod tests {
         let dir = temp("ensure");
         ensure_prompts(&dir).expect("copied");
         assert!(dir.join("prompts/web.md").is_file() && dir.join("prompts/general.md").is_file());
-        std::fs::write(dir.join("prompts/web.md"), "---\nversion: 3\ntitle: Mi web\n---\nmine").expect("edit");
+        std::fs::write(dir.join("prompts/web.md"), "---\nversion: 4\ntitle: Mi web\n---\nmine").expect("edit");
         std::fs::remove_file(dir.join("prompts/document.md")).expect("remove");
         ensure_prompts(&dir).expect("again");
         assert_eq!(
             std::fs::read_to_string(dir.join("prompts/web.md")).expect("read"),
-            "---\nversion: 3\ntitle: Mi web\n---\nmine",
+            "---\nversion: 4\ntitle: Mi web\n---\nmine",
             "the project's edit stays"
         );
         assert!(dir.join("prompts/document.md").is_file(), "a missing one comes back");
@@ -320,7 +320,7 @@ mod tests {
         std::fs::write(dir.join("prompts/web.md"), "---\ntitle: Web\nstack: HTML5\n---\nold").expect("old");
         ensure_prompts(&dir).expect("upgraded");
         assert_eq!(std::fs::read_to_string(dir.join("prompts/web.md.v1.bak")).expect("bak"), "---\ntitle: Web\nstack: HTML5\n---\nold");
-        assert!(std::fs::read_to_string(dir.join("prompts/web.md")).expect("new").contains("version: 3"));
+        assert!(std::fs::read_to_string(dir.join("prompts/web.md")).expect("new").contains("version: 4"));
         assert!(std::fs::read_to_string(dir.join(".agent/design.md.v1.bak")).expect("bak").contains("Expo"));
         assert!(std::fs::read_to_string(dir.join(".agent/design.md")).expect("new").contains("status: default"), "asks again");
         let _ = std::fs::remove_dir_all(dir);
